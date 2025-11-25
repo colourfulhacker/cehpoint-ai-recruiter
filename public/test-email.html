@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmailJS Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+
+        .container {
+            background: #16213e;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #4ecca3;
+        }
+
+        button {
+            background: #4ecca3;
+            color: #16213e;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 10px 5px;
+        }
+
+        button:hover {
+            background: #45b393;
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        #console {
+            background: #0f0f0f;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .log {
+            margin: 5px 0;
+        }
+
+        .log.success {
+            color: #4ecca3;
+        }
+
+        .log.error {
+            color: #ff6b6b;
+        }
+
+        .log.info {
+            color: #4ecdc4;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>📧 EmailJS Test</h1>
+        <p>Test your EmailJS configuration</p>
+
+        <div>
+            <button id="testBtn" onclick="testEmail()">Send Test Email</button>
+        </div>
+
+        <div id="console"></div>
+    </div>
+
+    <script>
+        // EmailJS Configuration
+        const SERVICE_ID = 'service_pdmyric';
+        const PUBLIC_KEY = '5sgdBsPJnFGBkoFEB';
+        const TEMPLATE_ID = 'template_interview';
+
+        function log(message, type = 'info') {
+            const consoleDiv = document.getElementById('console');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log ${type}`;
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            consoleDiv.appendChild(logEntry);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            console.log(message);
+        }
+
+        // Initialize EmailJS
+        emailjs.init(PUBLIC_KEY);
+        log('EmailJS initialized with public key: ' + PUBLIC_KEY, 'info');
+
+        async function testEmail() {
+            const btn = document.getElementById('testBtn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+
+            try {
+                log('📧 Preparing test email...', 'info');
+
+                const templateParams = {
+                    to_email: 'cehpoint@gmail.com, hr@cehpoint.co.in',
+                    candidate_name: 'Test Candidate',
+                    role: 'Software Engineer',
+                    language: 'English',
+                    status: 'SELECTED',
+                    notes: 'This is a test email from EmailJS integration',
+                    transcript: '[Test Interview] HR: Hello\\nCANDIDATE: Hi there',
+                    video_url: 'https://test.cloudinary.com/video.mp4',
+                    date: new Date().toLocaleString(),
+                    reply_to: 'hr@cehpoint.co.in',
+                };
+
+                log('📧 Template params: ' + JSON.stringify(templateParams, null, 2), 'info');
+                log('📧 Service ID: ' + SERVICE_ID, 'info');
+                log('📧 Template ID: ' + TEMPLATE_ID, 'info');
+                log('📧 Sending email...', 'info');
+
+                const response = await emailjs.send(
+                    SERVICE_ID,
+                    TEMPLATE_ID,
+                    templateParams
+                );
+
+                log('✅ Email sent successfully!', 'success');
+                log('Response: ' + JSON.stringify(response), 'success');
+
+                btn.textContent = 'Email Sent! ✅';
+                btn.style.background = '#4ecca3';
+
+            } catch (error) {
+                log('❌ Email failed: ' + error.text || error.message, 'error');
+                log('Error details: ' + JSON.stringify(error), 'error');
+
+                btn.textContent = 'Failed ❌';
+                btn.style.background = '#ff6b6b';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+
+</html>

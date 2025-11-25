@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloudinary Test - Video Upload</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        .container {
+            background: #16213e;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        h1 { color: #4ecca3; }
+        button {
+            background: #4ecca3;
+            color: #16213e;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 10px 5px;
+        }
+        button:hover { background: #45b393; }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        #console {
+            background: #0f0f0f;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log { margin: 5px 0; }
+        .log.success { color: #4ecca3; }
+        .log.error { color: #ff6b6b; }
+        .log.info { color: #4ecdc4; }
+        .log.warn { color: #ffd93d; }
+        video {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Cloudinary Video Upload Test</h1>
+        <p>This page tests the video recording and upload functionality.</p>
+        
+        <div>
+            <button id="startBtn" onclick="startRecording()">Start Recording</button>
+            <button id="stopBtn" onclick="stopRecording()" disabled>Stop Recording</button>
+            <button id="uploadBtn" onclick="uploadVideo()" disabled>Upload to Cloudinary</button>
+        </div>
+        
+        <video id="preview" autoplay muted playsinline style="display:none;"></video>
+        <video id="playback" controls style="display:none;"></video>
+        
+        <div id="console"></div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let recordedChunks = [];
+        let videoBlob;
+        let stream;
+
+        function log(message, type = 'info') {
+            const consoleDiv = document.getElementById('console');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log ${type}`;
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            consoleDiv.appendChild(logEntry);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            console.log(message);
+        }
+
+        async function startRecording() {
+            try {
+                log('🎥 Requesting camera and microphone access...', 'info');
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
+                });
+                
+                log('✅ Camera and microphone access granted', 'success');
+                
+                const preview = document.getElementById('preview');
+                preview.srcObject = stream;
+                preview.style.display = 'block';
+                
+                const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') 
+                    ? 'video/webm;codecs=vp9' 
+                    : MediaRecorder.isTypeSupported('video/webm') 
+                    ? 'video/webm' 
+                    : 'video/mp4';
+                
+                log(`📹 Using mime type: ${mimeType}`, 'info');
+                
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType,
+                    videoBitsPerSecond: 2500000
+                });
+                
+                recordedChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data && event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                        log(`📦 Chunk received: ${event.data.size} bytes`, 'info');
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    videoBlob = new Blob(recordedChunks, { type: mimeType });
+                    log(`✅ Recording stopped. Total size: ${videoBlob.size} bytes (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB)`, 'success');
+                    log(`📝 Blob type: ${videoBlob.type}`, 'info');
+                    
+                    const playback = document.getElementById('playback');
+                    playback.src = URL.createObjectURL(videoBlob);
+                    playback.style.display = 'block';
+                    
+                    document.getElementById('uploadBtn').disabled = false;
+                    document.getElementById('preview').style.display = 'none';
+                    
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.start(1000);
+                log('🔴 Recording started!', 'success');
+                
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('startBtn').disabled = false;
+            }
+        }
+
+        async function uploadVideo() {
+            if (!videoBlob) {
+                log('❌ No video to upload', 'error');
+                return;
+            }
+            
+            try {
+                log('📤 Preparing upload...', 'info');
+                log(`📊 Video size: ${videoBlob.size} bytes`, 'info');
+                log(`📊 Video type: ${videoBlob.type}`, 'info');
+                
+                const formData = new FormData();
+                const filename = `test_video_${Date.now()}.webm`;
+                formData.append('video', videoBlob, filename);
+                formData.append('name', 'Test User');
+                formData.append('role', 'Test Role');
+                formData.append('timestamp', Date.now().toString());
+                
+                log(`📤 Uploading to /api/upload-video...`, 'info');
+                
+                const response = await fetch('/api/upload-video', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                log(`📥 Response status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    log(`✅ Upload successful!`, 'success');
+                    log(`🔗 Video URL: ${result.videoUrl}`, 'success');
+                    log(`📝 Public ID: ${result.publicId}`, 'info');
+                    log(`⏱️ Duration: ${result.duration}s`, 'info');
+                    log(`📄 Format: ${result.format}`, 'info');
+                    
+                    // Create clickable link
+                    const consoleDiv = document.getElementById('console');
+                    const link = document.createElement('div');
+                    link.className = 'log success';
+                    link.innerHTML = `<a href="${result.videoUrl}" target="_blank" style="color: #4ecca3; text-decoration: underline;">🎥 Click here to view video in Cloudinary</a>`;
+                    consoleDiv.appendChild(link);
+                } else {
+                    log(`❌ Upload failed: ${result.error}`, 'error');
+                    if (result.details) {
+                        log(`📋 Details: ${result.details}`, 'error');
+                    }
+                }
+                
+            } catch (error) {
+                log(`❌ Upload error: ${error.message}`, 'error');
+                log(`📋 Stack: ${error.stack}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
