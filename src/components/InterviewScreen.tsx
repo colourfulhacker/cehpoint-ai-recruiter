@@ -18,6 +18,7 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     const [connectionState, setConnectionState] = useState<'idle' | 'initializing' | 'connecting' | 'connected' | 'reconnecting' | 'error'>('idle');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [showContactOverlay, setShowContactOverlay] = useState(false);
+    const [showInstructionBanner, setShowInstructionBanner] = useState(true);
 
     // Audio Visualizer Refs
     const userMeterRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -63,6 +64,16 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     const poorAnswerCountRef = useRef<number>(0);
     const strongAnswerCountRef = useRef<number>(0);
     const hasCalledNotifyRef = useRef<boolean>(false); // Prevent multiple notifyResult calls
+
+    // Hide instruction banner after 4 seconds when connected
+    useEffect(() => {
+        if (connectionState === 'connected' && showInstructionBanner) {
+            const timer = setTimeout(() => {
+                setShowInstructionBanner(false);
+            }, 4000);
+            return () => clearTimeout(timer);
+        }
+    }, [connectionState, showInstructionBanner]);
 
     // Save interview state to localStorage for data loss prevention
     const saveToLocalStorage = (data: any) => {
@@ -924,15 +935,17 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
 
                     {/* Center Instruction Banner */}
                     <div className="flex-1 flex items-center justify-center">
-                        <div className="bg-gradient-to-r from-indigo-600/90 to-blue-600/90 backdrop-blur-md border-2 border-white/30 px-8 py-6 rounded-2xl shadow-2xl animate-pulse pointer-events-none">
-                            <div className="flex items-center gap-4">
-                                <Mic className="w-8 h-8 text-white animate-bounce" />
-                                <div>
-                                    <h3 className="text-2xl font-bold text-white mb-1">👋 Say "Hello" to begin your interview</h3>
-                                    <p className="text-white/90 text-sm">The AI interviewer is listening and will respond to you</p>
+                        {showInstructionBanner && (
+                            <div className="bg-gradient-to-r from-indigo-600/90 to-blue-600/90 backdrop-blur-md border-2 border-white/30 px-8 py-6 rounded-2xl shadow-2xl animate-pulse pointer-events-none transition-opacity duration-500">
+                                <div className="flex items-center gap-4">
+                                    <Mic className="w-8 h-8 text-white animate-bounce" />
+                                    <div>
+                                        <h3 className="text-2xl font-bold text-white mb-1">👋 Say "Hello" to begin your interview</h3>
+                                        <p className="text-white/90 text-sm">The AI interviewer is listening and will respond to you</p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
                     </div>
 
                     {/* Bottom Controls */}
