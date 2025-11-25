@@ -922,8 +922,18 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                         </div>
                     </div>
 
-                    {/* Empty center area to remove subtitles distraction */}
-                    <div className="flex-1"></div>
+                    {/* Center Instruction Banner */}
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="bg-gradient-to-r from-indigo-600/90 to-blue-600/90 backdrop-blur-md border-2 border-white/30 px-8 py-6 rounded-2xl shadow-2xl animate-pulse pointer-events-none">
+                            <div className="flex items-center gap-4">
+                                <Mic className="w-8 h-8 text-white animate-bounce" />
+                                <div>
+                                    <h3 className="text-2xl font-bold text-white mb-1">👋 Say "Hello" to begin your interview</h3>
+                                    <p className="text-white/90 text-sm">The AI interviewer is listening and will respond to you</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     {/* Bottom Controls */}
                     <div className="h-24 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-center justify-between px-8 pointer-events-auto">
