@@ -484,6 +484,15 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
         try {
             const session = await ai.live.connect(configObj);
             sessionRef.current = session;
+
+            // 🎯 KICKSTART: Send a hidden message to FORCE the AI to speak immediately
+            // This guarantees the conversation starts even if the model is waiting for input
+            setTimeout(() => {
+                console.log("🚀 Sending kickstart message to AI...");
+                if (sessionRef.current) {
+                    sessionRef.current.send({ parts: [{ text: "The candidate is connected and ready. Start the interview now." }] });
+                }
+            }, 100);
         } catch (err: any) {
             console.error("Connection Failed:", err);
             handleDisconnect();
