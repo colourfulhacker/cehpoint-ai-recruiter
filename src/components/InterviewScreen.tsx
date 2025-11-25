@@ -18,7 +18,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     const [connectionState, setConnectionState] = useState<'idle' | 'initializing' | 'connecting' | 'connected' | 'reconnecting' | 'error'>('idle');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [showContactOverlay, setShowContactOverlay] = useState(false);
-    const [aiGreetingDone, setAiGreetingDone] = useState(false); // Track if AI already greeted
 
     // Audio Visualizer Refs
     const userMeterRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -449,13 +448,8 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                         audioContextRef.current.resume();
                     }
 
-                    // AI speaks FIRST with professional greeting - IMMEDIATE NO DELAY
-                    if (!aiGreetingDone) {
-                        setAiGreetingDone(true);
-                        const greeting = getLanguageGreeting(config.language);
-                        // Send greeting IMMEDIATELY - no setTimeout delay
-                        sessionRef.current?.send({ parts: [{ text: greeting }] });
-                    }
+                    // AI will greet automatically based on system prompt instruction
+                    console.log("🎯 AI will start speaking based on system prompt");
                 },
                 onmessage: async (msg: LiveServerMessage) => {
                     handleServerMessage(msg);
@@ -712,6 +706,12 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     Candidate: ${config.name}
     Position: ${config.role}
     Language: ${config.language} (SPEAK ONLY IN THIS LANGUAGE)
+    
+    ===== CRITICAL: START SPEAKING IMMEDIATELY =====
+    🎯 FIRST ACTION: When this session starts, YOU MUST IMMEDIATELY greet the candidate with your introduction.
+    DO NOT WAIT for the candidate to speak first. YOU speak first to start the conversation.
+    Your opening line should be: "${getLanguageGreeting(config.language)}"
+    After greeting, wait for their response, then begin asking questions.
     
     ${JOB_DESCRIPTIONS[config.role]}
 
