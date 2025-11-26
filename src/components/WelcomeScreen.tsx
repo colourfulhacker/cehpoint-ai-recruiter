@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { JobRole, Language, InterviewConfig } from '../types';
-import { ArrowRight, Mic, Briefcase, User, Megaphone, Terminal, Cpu, CheckCircle2, Globe, Palette, TrendingUp, Shield, Bug } from 'lucide-react';
+import { ArrowRight, Mic, Briefcase, User, Megaphone, Terminal, Cpu, CheckCircle2, Globe, Palette, TrendingUp, Shield, Bug, Phone, Presentation } from 'lucide-react';
 
 interface WelcomeScreenProps {
   onStart: (config: InterviewConfig) => void;
@@ -27,6 +27,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
       case JobRole.IT_SALES_INTERN: return <TrendingUp className="w-5 h-5" />;
       case JobRole.CYBER_SECURITY_INTERN: return <Shield className="w-5 h-5" />;
       case JobRole.JUNIOR_PENTEST: return <Bug className="w-5 h-5" />;
+      case JobRole.TELECALLING: return <Phone className="w-5 h-5" />;
+      case JobRole.PRESENTATION_SPECIALIST: return <Presentation className="w-5 h-5" />;
       default: return <Briefcase className="w-5 h-5" />;
     }
   };
@@ -49,7 +51,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
             </div>
           </div>
           <h1 className="text-4xl font-bold text-white mb-2 tracking-tight">AI Recruiter</h1>
-          <p className="text-slate-400 text-lg">Automated Screening & Technical Assessment</p>
+          <p className="text-slate-400 text-lg mb-3">Automated Screening & Technical Assessment</p>
+          <div className="flex items-center justify-center gap-2 text-indigo-300 hover:text-indigo-200 transition-colors">
+            <Phone className="w-4 h-4" />
+            <a href="tel:+913369029331" className="text-sm font-medium tracking-wide">
+              Helpline: +91 33690 29331
+            </a>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-8">
