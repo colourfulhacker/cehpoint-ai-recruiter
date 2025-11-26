@@ -58,6 +58,7 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     const audioMixerRef = useRef<MediaStreamAudioDestinationNode | null>(null); // For mixing AI audio into recording
     const strikeCountRef = useRef<number>(0);
     const animationFrameRef = useRef<number | null>(null);
+    const pcmBufferRef = useRef<Float32Array>(new Float32Array(0)); // Buffer for audio batching
 
     // Interview tracking for smart decision-making
     const questionCountRef = useRef<number>(0);
@@ -132,10 +133,12 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                 if (isIntentionalCloseRef.current) return;
                 const timeSinceSpeech = Date.now() - lastUserSpeechTimeRef.current;
 
-                // 8 seconds of silence + AI not talking
-                if (timeSinceSpeech > 8000 && !isAiSpeakingRef.current) {
+                // 15 seconds of silence (increased from 8s to prevent premature timeouts) + AI not talking
+                if (timeSinceSpeech > 15000 && !isAiSpeakingRef.current) {
                     strikeCountRef.current += 1;
                     lastUserSpeechTimeRef.current = Date.now(); // Reset to give them a chance
+
+                    console.log(`⚠️ Silence detected. Strike: ${strikeCountRef.current}/3`);
 
                     if (strikeCountRef.current >= 3) {
                         sessionRef.current?.send({ parts: [{ text: "[SYSTEM: Candidate unresponsive 3x. Fail them now. Say 'I am ending this due to lack of response' and call notifyResult(false, 'Unresponsive').]" }] });
@@ -372,7 +375,10 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                     });
 
                     // Detect user speech activity for silence monitoring
-                    if (avg > 20) {
+                    // CRITICAL FIX: Use a lower threshold here (10 instead of 20) to detect speech 
+                    // even if it's too quiet for the noise gate to pass to Gemini.
+                    // This prevents "Are you still there?" prompts when the user IS speaking but quietly.
+                    if (avg > 10) {
                         lastUserSpeechTimeRef.current = Date.now();
                         strikeCountRef.current = 0;
                     }
@@ -413,32 +419,44 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
 
                 const inputData = e.inputBuffer.getChannelData(0);
 
-                // RMS-based Noise Gate / VAD
-                // Calculate Root Mean Square (RMS) amplitude
-                let sum = 0;
-                for (let i = 0; i < inputData.length; i++) {
-                    sum += inputData[i] * inputData[i];
-                }
-                const rms = Math.sqrt(sum / inputData.length);
+                // --- AUDIO BATCHING FOR LATENCY OPTIMIZATION ---
+                // Instead of sending every 512 samples (32ms), we accumulate them.
+                // Sending too frequently clogs the WebSocket and causes massive latency (10s+).
+                // We'll batch ~4096 samples (approx 256ms) which is a sweet spot for 
+                // low network overhead vs. reasonable capture latency.
 
-                // Threshold: 0.002 (Lowered from 0.01 to fix "AI stopped speaking/hearing" issue)
-                // This is sensitive enough to pick up soft speech but should still filter absolute silence/hiss.
-                if (rms < 0.002) {
-                    return;
-                }
+                // 1. Append new data to buffer
+                const newBuffer = new Float32Array(pcmBufferRef.current.length + inputData.length);
+                newBuffer.set(pcmBufferRef.current);
+                newBuffer.set(inputData, pcmBufferRef.current.length);
+                pcmBufferRef.current = newBuffer;
 
-                // Debug log (throttled) to check mic levels if needed
-                if (Math.random() < 0.01) {
-                    console.log("🎤 Mic Input RMS:", rms.toFixed(4));
-                }
+                // 2. Check if we have enough data to send (2048 samples = ~128ms at 16kHz)
+                // Reduced from 4096 to improve responsiveness while still batching.
+                if (pcmBufferRef.current.length >= 2048) {
+                    const chunkToSend = pcmBufferRef.current;
+                    pcmBufferRef.current = new Float32Array(0); // Reset buffer
 
-                // ULTRA-LOW LATENCY: Send audio chunks only if they contain speech
-                const pcmBlob = createPcmBlob(inputData);
+                    // REMOVED VAD CHECK: The previous VAD was too aggressive on batches, 
+                    // causing "not responding" issues if speech was mixed with silence.
+                    // We now send ALL audio chunks to ensure the AI hears everything.
 
-                try {
-                    sessionRef.current.sendRealtimeInput({ media: pcmBlob });
-                } catch (err) {
-                    // Sockets can close unexpectedly, ignore send errors
+                    /* 
+                    let sum = 0;
+                    for (let i = 0; i < chunkToSend.length; i++) {
+                        sum += chunkToSend[i] * chunkToSend[i];
+                    }
+                    const rms = Math.sqrt(sum / chunkToSend.length);
+                    if (rms < 0.002) return; 
+                    */
+
+                    // Send the batched chunk
+                    const pcmBlob = createPcmBlob(chunkToSend);
+                    try {
+                        sessionRef.current.sendRealtimeInput({ media: pcmBlob });
+                    } catch (err) {
+                        // Ignore send errors
+                    }
                 }
             };
 
@@ -483,18 +501,19 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                     handleServerMessage(msg);
                 },
                 onclose: (e: any) => {
-                    console.log("Gemini Closed", e);
+                    console.log("🔴 Gemini Connection Closed", e);
 
                     // Critical Fix: If the connection closes instantly (<1s), it's a configuration error.
                     if (Date.now() - connectStartTimeRef.current < 1000) {
                         setConnectionState('error');
                         setErrorMsg("Connection rejected. Please check API Key or Network.");
                     } else {
+                        console.log("🔄 Attempting reconnect due to closure...");
                         handleDisconnect();
                     }
                 },
                 onerror: (e: any) => {
-                    console.error("Gemini Error", e);
+                    console.error("🔴 Gemini Connection Error", e);
                     handleDisconnect();
                 }
             },

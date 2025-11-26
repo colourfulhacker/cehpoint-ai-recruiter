@@ -14,8 +14,12 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buffer);
   const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000; // 32768
+
+  // Process in chunks to avoid stack overflow with large buffers
+  for (let i = 0; i < len; i += chunkSize) {
+    // @ts-ignore - apply accepts typed array
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, len)));
   }
   return btoa(binary);
 }
@@ -43,14 +47,14 @@ export async function decodeAudioData(
 export function createPcmBlob(data: Float32Array): Blob {
   const l = data.length;
   const int16 = new Int16Array(l);
-  
+
   for (let i = 0; i < l; i++) {
     // Clamp values to [-1, 1] to prevent wrapping artifacts
     const s = Math.max(-1, Math.min(1, data[i]));
     // Convert to 16-bit PCM
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
-  
+
   return {
     data: arrayBufferToBase64(int16.buffer),
     mimeType: 'audio/pcm;rate=16000',
