@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { InterviewConfig, InterviewResult } from '../types';
-import { CheckCircle, XCircle, Download, Phone, RefreshCcw, Mail, AlertCircle, Calendar, User, Briefcase, MessageSquare, Upload, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, Phone, RefreshCcw, Mail, AlertCircle, Calendar, User, Briefcase, Upload, Loader2, Info, ChevronDown, ChevronUp, Activity, Cloud } from 'lucide-react';
 import { uploadVideoToCloudinary, validateVideoBlob } from '../utils/video-upload';
 import { sendInterviewEmail } from '../utils/email-service';
 
@@ -126,25 +126,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({ config, result, onRe
     }
   };
 
-  const downloadLog = () => {
-    if (result.transcript && result.transcript.length > 0) {
-      const header = `CEHPOINT AI RECRUITER - INTERVIEW LOG\nCandidate: ${config.name}\nRole: ${config.role}\nDate: ${new Date().toLocaleString()}\nResult: ${result.passed ? "SELECTED" : "REJECTED"}\nNotes: ${result.notes || "N/A"}\n------------------------------------------\n\n`;
 
-      const content = result.transcript.map(t =>
-        `[${t.timestamp}] ${t.speaker === 'ai' ? 'HR (Sarah)' : 'CANDIDATE'}: ${t.text}`
-      ).join('\n\n');
-
-      const blob = new Blob([header + content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `${config.name.replace(/\s+/g, '_')}_Interview_Log.txt`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 md:p-8 font-sans text-slate-200">
@@ -173,21 +155,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({ config, result, onRe
                   : "Thank you for applying. We encourage you to improve your technical depth and try again."}
               </p>
 
-              {/* Email Status Pill */}
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-900/40 border border-indigo-500/30 backdrop-blur-sm text-xs font-medium">
-                {saveStatus === 'saving' && (
-                  <><Loader2 className="w-3 h-3 text-indigo-400 animate-spin" /> Sending email...</>
-                )}
-                {saveStatus === 'success' && (
-                  <><Mail className="w-3 h-3 text-green-400" /> Email sent to HR</>
-                )}
-                {saveStatus === 'error' && (
-                  <><AlertCircle className="w-3 h-3 text-red-400" /> Email failed</>
-                )}
-                {!result.videoBlob && (
-                  <><AlertCircle className="w-3 h-3 text-indigo-400" /> Please email your interview log to hr@cehpoint.co.in</>
-                )}
-              </div>
+
             </div>
           </div>
 
@@ -220,14 +188,10 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({ config, result, onRe
           </div>
 
           {/* Actions */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3">
             <button onClick={onRestart} className="flex flex-col items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 p-4 rounded-xl border border-slate-700 transition-all group">
               <RefreshCcw className="w-5 h-5 text-slate-400 group-hover:rotate-180 transition-transform duration-500" />
               <span className="text-xs font-medium text-slate-300">New Interview</span>
-            </button>
-            <button onClick={downloadLog} className="flex flex-col items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 p-4 rounded-xl shadow-lg shadow-indigo-900/20 transition-all">
-              <Download className="w-5 h-5 text-white" />
-              <span className="text-xs font-medium text-white">Download Log</span>
             </button>
           </div>
         </div>
@@ -237,25 +201,36 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({ config, result, onRe
 
           {/* Feedback / Contact Section */}
           {result.passed ? (
-            <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-2xl p-6 flex flex-col items-start gap-4 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-full bg-gradient-to-l from-emerald-500/10 to-transparent pointer-events-none"></div>
+
               <div>
-                <h3 className="text-emerald-400 font-bold text-lg flex items-center gap-2">
-                  <Phone className="w-5 h-5" /> Next Steps
+                <h3 className="text-emerald-400 font-bold text-xl flex items-center gap-2 mb-2">
+                  <CheckCircle className="w-6 h-6" /> 🎉 Congratulations! You're Shortlisted
                 </h3>
-                <p className="text-slate-400 text-sm mt-1 max-w-md">
-                  Please contact the CEO directly to finalize your offer letter. Mention your reference ID: <span className="text-white font-mono">CP-{Math.floor(Math.random() * 1000)}</span>
+                <p className="text-white text-base font-medium mb-2">
+                  Final Round: Complete Onboarding Process
+                </p>
+                <p className="text-slate-300 text-sm max-w-xl">
+                  You have successfully cleared the AI screening round! To proceed with your application, please complete the final onboarding process where you'll submit your expected stipend/salary and answer a few important questions.
                 </p>
               </div>
-              <div className="flex gap-4 relative z-10">
-                <div className="text-right">
-                  <p className="text-xs text-slate-500 uppercase font-bold">Direct Line</p>
-                  <p className="text-xl font-mono text-white font-bold tracking-wider">9091156095</p>
-                </div>
-                <div className="w-px bg-slate-700 mx-2"></div>
-                <div className="text-left">
-                  <p className="text-xs text-slate-500 uppercase font-bold">HR Email</p>
-                  <p className="text-sm font-mono text-white">hr@cehpoint.co.in</p>
+
+              <div className="flex items-center gap-4 z-10 w-full md:w-auto">
+                <a
+                  href="https://internlink.cehpoint.co.in/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-8 rounded-xl transition-all shadow-lg shadow-emerald-900/30 text-center text-base"
+                >
+                  Complete Onboarding Process →
+                </a>
+
+                <div className="group relative">
+                  <Info className="w-5 h-5 text-slate-500 hover:text-slate-300 cursor-help" />
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-800 border border-slate-700 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none text-sm text-slate-300 z-50">
+                    <strong className="text-emerald-400">Final Step:</strong> This is the last stage before joining our team. Complete the onboarding form to provide your salary expectations and finalize your application.
+                  </div>
                 </div>
               </div>
             </div>
@@ -264,49 +239,64 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({ config, result, onRe
               <h3 className="text-red-400 font-bold text-sm uppercase tracking-wider mb-2 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4" /> Assessment Feedback
               </h3>
-              <p className="text-slate-300 italic">"{result.notes || "Candidate struggled with core technical concepts and lacked depth in scenario-based answers."}"</p>
+              <p className="text-slate-300 italic">"{result.notes || "Based on this assessment, we need someone with more hands-on depth in the required areas. We encourage you to strengthen your skills and apply again in the future."}"</p>
             </div>
           )}
 
-          {/* Chat Log */}
-          <div className="flex-1 glass-panel rounded-2xl border border-white/5 flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-white/5 bg-slate-900/50 flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-indigo-400" />
-              <span className="text-sm font-semibold text-slate-300">Interview Transcript</span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-slate-700">
-              {result.transcript.map((entry, idx) => (
-                <div key={idx} className={`flex gap-4 ${entry.speaker === 'ai' ? 'flex-row' : 'flex-row-reverse'}`}>
-                  {/* Avatar */}
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${entry.speaker === 'ai' ? 'bg-indigo-600' : 'bg-emerald-600'}`}>
-                    <span className="text-xs font-bold text-white">{entry.speaker === 'ai' ? 'AI' : 'ME'}</span>
-                  </div>
-
-                  {/* Bubble */}
-                  <div className={`flex flex-col max-w-[80%] ${entry.speaker === 'ai' ? 'items-start' : 'items-end'}`}>
-                    <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${entry.speaker === 'ai'
-                      ? 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700'
-                      : 'bg-indigo-600 text-white rounded-tr-none shadow-lg'
-                      }`}>
-                      {entry.text}
-                    </div>
-                    <span className="text-[10px] text-slate-600 mt-1 px-1">{entry.timestamp}</span>
-                  </div>
+          {/* Submission Status Card (Replaces Transcript) */}
+          <div className="glass-panel rounded-2xl border border-white/5 p-6">
+            <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-indigo-400" />
+              Submission Status
+            </h3>
+            <div className="space-y-4">
+              {/* Video Upload Step */}
+              <div className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${videoUploadStatus === 'uploading' ? 'bg-indigo-900/20 border-indigo-500/30' : 'bg-slate-800/50 border-white/5'}`}>
+                <div className="shrink-0">
+                  {videoUploadStatus === 'uploading' && <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />}
+                  {videoUploadStatus === 'success' && <CheckCircle className="w-6 h-6 text-emerald-400" />}
+                  {videoUploadStatus === 'error' && <AlertCircle className="w-6 h-6 text-red-400" />}
+                  {videoUploadStatus === 'idle' && <div className="w-6 h-6 rounded-full border-2 border-slate-600" />}
                 </div>
-              ))}
-
-              {result.transcript.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-50">
-                  <MessageSquare className="w-12 h-12 mb-2" />
-                  <p className="text-sm">No conversation recorded</p>
+                <div>
+                  <p className="text-sm font-medium text-white flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-slate-400" /> Interview Video Upload
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {videoUploadStatus === 'uploading' && "Uploading your interview recording to secure cloud storage..."}
+                    {videoUploadStatus === 'success' && "Video uploaded successfully."}
+                    {videoUploadStatus === 'error' && "Upload failed. Please download the log manually."}
+                    {videoUploadStatus === 'idle' && "Waiting to start upload..."}
+                  </p>
                 </div>
-              )}
+              </div>
+
+              {/* Email Step */}
+              <div className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${saveStatus === 'saving' ? 'bg-indigo-900/20 border-indigo-500/30' : 'bg-slate-800/50 border-white/5'}`}>
+                <div className="shrink-0">
+                  {saveStatus === 'saving' && <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />}
+                  {saveStatus === 'success' && <CheckCircle className="w-6 h-6 text-emerald-400" />}
+                  {saveStatus === 'error' && <AlertCircle className="w-6 h-6 text-red-400" />}
+                  {saveStatus === 'idle' && <div className="w-6 h-6 rounded-full border-2 border-slate-600" />}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-white flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-slate-400" /> HR Notification
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {saveStatus === 'saving' && "Sending interview results and video link to HR..."}
+                    {saveStatus === 'success' && "Results sent successfully to HR team."}
+                    {saveStatus === 'error' && "Email failed. Please download log and email to hr@cehpoint.co.in"}
+                    {saveStatus === 'idle' && "Waiting for video upload to complete..."}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 
         </div>
       </div>
+
     </div>
   );
 };

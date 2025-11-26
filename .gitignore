@@ -26,5 +26,6 @@ dist-ssr
 .vercel
 
 .env
-
+.env.example
+.env.*
 .vercel
