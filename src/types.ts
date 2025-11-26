@@ -6,7 +6,9 @@ export enum JobRole {
   SECURE_DEV = 'Secure Software Developer',
   DEVSECOPS = 'DevSecOps Engineer',
   UI_UX_INTERN = 'UI/UX Designer Intern',
-  IT_SALES_INTERN = 'IT Sales Intern'
+  IT_SALES_INTERN = 'IT Sales Intern',
+  CYBER_SECURITY_INTERN = 'Cyber Security Intern',
+  JUNIOR_PENTEST = 'Junior Penetration Tester'
 }
 
 export enum Language {
@@ -42,5 +44,7 @@ export const JOB_DESCRIPTIONS: Record<JobRole, string> = {
   [JobRole.SECURE_DEV]: "Target Profile: Secure Software Developer. \nKey Skills: Secure coding practices, React/Node.js, Web security (XSS, CSRF, SQLi), Secure auth/authz, DevSecOps tools. \nScenario: Ask how to prevent XSS in a React app or secure a Node.js API against brute force attacks. \nTrait: Look for a security-first mindset in development choices. \nRequirements: 4+ years experience in secure software development.",
   [JobRole.DEVSECOPS]: "Target Profile: DevSecOps Engineer. \nKey Skills: CI/CD security, AWS/Azure security, Container security, IaC (Terraform), SAST/DAST tools. \nScenario: Ask how to integrate security scanning into a Jenkins pipeline or secure a Kubernetes cluster. \nTrait: Look for automation skills and ability to bridge dev, ops, and security. \nRequirements: 3+ years experience in DevOps with security focus.",
   [JobRole.UI_UX_INTERN]: "Target Profile: Creative UI/UX Designer Intern. \nKey Skills: Figma, Wireframing, Prototyping, User Research, Mobile & Web Design Principles, Color Theory, Typography. \nScenario: Ask them to walk through their design process for a mobile app or how they handle user feedback on a design. \nTrait: Look for creativity, empathy for the user, and attention to detail. \nResponsibilities: Designing website and mobile application interfaces under senior guidance.",
-  [JobRole.IT_SALES_INTERN]: "Target Profile: Ambitious IT Sales Intern. \nKey Skills: Lead Generation, Technical Sales (SaaS, Cybersecurity), Client Communication, Negotiation, CRM tools, Understanding of Software Development Lifecycle. \nScenario: Ask how they would pitch a cybersecurity service to a non-technical CEO or handle a client objection about price. \nTrait: Look for confidence, persistence, and ability to explain technical concepts simply. \nResponsibilities: Selling technical services like software development and cyber security."
+  [JobRole.IT_SALES_INTERN]: "Target Profile: Ambitious IT Sales Intern. \nKey Skills: Lead Generation, Technical Sales (SaaS, Cybersecurity), Client Communication, Negotiation, CRM tools, Understanding of Software Development Lifecycle. \nScenario: Ask how they would pitch a cybersecurity service to a non-technical CEO or handle a client objection about price. \nTrait: Look for confidence, persistence, and ability to explain technical concepts simply. \nResponsibilities: Selling technical services like software development and cyber security.",
+  [JobRole.CYBER_SECURITY_INTERN]: "Target Profile: Aspiring Cyber Security Intern. \nKey Skills: Basic Networking (OSI Model, TCP/IP), Linux Basics, CIA Triad, Common Attacks (Phishing, Malware), and Security Tools (Nmap, Wireshark). \nScenario: Ask how to secure a home Wi-Fi network or explain the difference between HTTP and HTTPS. \nTrait: Look for foundational knowledge, curiosity, and ethical mindset. \nResponsibilities: Assisting in security monitoring and vulnerability assessments.",
+  [JobRole.JUNIOR_PENTEST]: "Target Profile: Junior Penetration Tester. \nKey Skills: Web App Security (OWASP Top 10), Network Scanning, Metasploit, Burp Suite, Python/Bash Scripting, Report Writing. \nScenario: Ask how to perform SQL injection on a login page or how to scan a network for open ports. \nTrait: Look for methodical approach, attention to detail, and ability to document findings. \nResponsibilities: Conducting authorized simulated attacks to find security weaknesses."
 };

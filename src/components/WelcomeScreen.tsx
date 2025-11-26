@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { JobRole, Language, InterviewConfig } from '../types';
-import { ArrowRight, Mic, Briefcase, User, Megaphone, Terminal, Cpu, CheckCircle2, Globe, Palette, TrendingUp } from 'lucide-react';
+import { ArrowRight, Mic, Briefcase, User, Megaphone, Terminal, Cpu, CheckCircle2, Globe, Palette, TrendingUp, Shield, Bug } from 'lucide-react';
 
 interface WelcomeScreenProps {
   onStart: (config: InterviewConfig) => void;
@@ -25,6 +25,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
       case JobRole.SDE_JOB: return <Cpu className="w-5 h-5" />;
       case JobRole.UI_UX_INTERN: return <Palette className="w-5 h-5" />;
       case JobRole.IT_SALES_INTERN: return <TrendingUp className="w-5 h-5" />;
+      case JobRole.CYBER_SECURITY_INTERN: return <Shield className="w-5 h-5" />;
+      case JobRole.JUNIOR_PENTEST: return <Bug className="w-5 h-5" />;
       default: return <Briefcase className="w-5 h-5" />;
     }
   };
@@ -83,8 +85,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
                   type="button"
                   onClick={() => setRole(r)}
                   className={`relative flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-200 group h-32 text-center gap-3 ${role === r
-                      ? 'bg-indigo-600/20 border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
-                      : 'bg-slate-900/40 border-slate-700 hover:border-slate-500 hover:bg-slate-800/60'
+                    ? 'bg-indigo-600/20 border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
+                    : 'bg-slate-900/40 border-slate-700 hover:border-slate-500 hover:bg-slate-800/60'
                     }`}
                 >
                   <div className={`p-2 rounded-lg transition-colors ${role === r ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400 group-hover:text-slate-200'}`}>
@@ -112,8 +114,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
                   type="button"
                   onClick={() => setLanguage(l)}
                   className={`flex-1 py-3 px-4 rounded-xl border text-sm font-medium transition-all ${language === l
-                      ? 'bg-indigo-600/20 border-indigo-500 text-indigo-100 shadow-lg'
-                      : 'bg-slate-900/40 border-slate-700 text-slate-400 hover:border-slate-500 hover:bg-slate-800/60'
+                    ? 'bg-indigo-600/20 border-indigo-500 text-indigo-100 shadow-lg'
+                    : 'bg-slate-900/40 border-slate-700 text-slate-400 hover:border-slate-500 hover:bg-slate-800/60'
                     }`}
                 >
                   {l}
