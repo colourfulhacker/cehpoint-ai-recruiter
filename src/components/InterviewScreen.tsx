@@ -421,11 +421,15 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                 }
                 const rms = Math.sqrt(sum / inputData.length);
 
-                // Threshold: 0.01 is a good starting point for "silence" vs "speech"
-                // If below threshold, we assume it's background noise/silence and DO NOT send it.
-                // This prevents the AI from interrupting itself due to echo or low-level noise.
-                if (rms < 0.01) {
+                // Threshold: 0.002 (Lowered from 0.01 to fix "AI stopped speaking/hearing" issue)
+                // This is sensitive enough to pick up soft speech but should still filter absolute silence/hiss.
+                if (rms < 0.002) {
                     return;
+                }
+
+                // Debug log (throttled) to check mic levels if needed
+                if (Math.random() < 0.01) {
+                    console.log("🎤 Mic Input RMS:", rms.toFixed(4));
                 }
 
                 // ULTRA-LOW LATENCY: Send audio chunks only if they contain speech
