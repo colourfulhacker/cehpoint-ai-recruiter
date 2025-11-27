@@ -82,8 +82,7 @@ export default async function handler(req, res) {
               status,
               notes,
               transcript, // Supabase handles JSONB automatically
-              video_url: videoUrl,
-              result: status // Map status to result column if needed
+              video_url: videoUrl
             }
           ]);
 

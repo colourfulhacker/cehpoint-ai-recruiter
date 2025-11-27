@@ -94,8 +94,7 @@ export default async function handler(req, res) {
             createdAt: interview.created_at,
             bytes: 0,
             role: interview.role,
-            status: interview.status,
-            result: interview.result
+            status: interview.status
         }));
 
         console.log(`✅ [GET-INTERVIEWS] Found ${formattedInterviews.length} interviews`);
