@@ -21,6 +21,7 @@ export enum Language {
 
 export interface InterviewConfig {
   name: string;
+  email: string;
   role: JobRole;
   language: Language;
 }
@@ -30,6 +31,8 @@ export interface TranscriptEntry {
   text: string;
   timestamp: string;
 }
+
+
 
 export interface InterviewResult {
   passed: boolean;

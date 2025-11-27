@@ -8,13 +8,14 @@ interface WelcomeScreenProps {
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [role, setRole] = useState<JobRole>(JobRole.SDE_INTERN);
   const [language, setLanguage] = useState<Language>(Language.ENGLISH);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (name.trim()) {
-      onStart({ name, role, language });
+    if (name.trim() && email.trim()) {
+      onStart({ name, email, role, language });
     }
   };
 
@@ -76,6 +77,24 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
                 onChange={(e) => setName(e.target.value)}
                 className="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-5 py-4 text-white focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all placeholder-slate-600 text-lg group-hover:bg-slate-900/80"
                 placeholder="Enter your full name..."
+              />
+            </div>
+          </div>
+
+          {/* Email Input */}
+          <div className="space-y-3">
+            <label className="flex items-center text-sm font-semibold text-slate-300 gap-2 uppercase tracking-wider">
+              <User size={14} className="text-indigo-400" />
+              Email Address
+            </label>
+            <div className="relative group">
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-5 py-4 text-white focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all placeholder-slate-600 text-lg group-hover:bg-slate-900/80"
+                placeholder="Enter your email address..."
               />
             </div>
           </div>

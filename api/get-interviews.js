@@ -1,16 +1,9 @@
-import { v2 as cloudinary } from 'cloudinary';
+import { supabase } from './lib/supabase';
 
 /**
- * API endpoint to fetch all interview videos from Cloudinary
- * Returns candidate names and video URLs for HR dashboard
+ * API endpoint to fetch all interview videos from Supabase
+ * Returns candidate names, emails, and video URLs for HR dashboard
  */
-
-// Configure Cloudinary
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-});
 
 export default async function handler(req, res) {
     // CORS handling - allow public access
@@ -27,27 +20,28 @@ export default async function handler(req, res) {
     }
 
     try {
-        console.log('📊 [GET-INTERVIEWS] Fetching interview videos from Cloudinary...');
+        console.log('📊 [GET-INTERVIEWS] Fetching interviews from Supabase...');
 
-        // Check Cloudinary configuration
-        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-            console.error('❌ [GET-INTERVIEWS] Cloudinary not configured');
+        if (!supabase) {
+            console.error('❌ [GET-INTERVIEWS] Supabase client not initialized (missing env vars)');
             return res.status(503).json({
-                error: 'Cloudinary not configured',
-                message: 'Please contact administrator'
+                error: 'Database configuration missing',
+                details: 'SUPABASE_URL or SUPABASE_ANON_KEY not set'
             });
         }
 
-        // Fetch all videos from the interview-recordings folder
-        const result = await cloudinary.api.resources({
-            type: 'upload',
-            resource_type: 'video',
-            prefix: 'interview-recordings/',
-            max_results: 500, // Adjust as needed
-        });
+        const { data: interviews, error } = await supabase
+            .from('interviews')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-        if (!result.resources || result.resources.length === 0) {
-            console.log('⚠️ [GET-INTERVIEWS] No videos found in Cloudinary');
+        if (error) {
+            console.error('❌ [GET-INTERVIEWS] Supabase query error:', error);
+            throw error;
+        }
+
+        if (!interviews || interviews.length === 0) {
+            console.log('⚠️ [GET-INTERVIEWS] No interviews found in Supabase');
             return res.status(200).json({
                 success: true,
                 interviews: [],
@@ -55,51 +49,37 @@ export default async function handler(req, res) {
             });
         }
 
-        // Parse video metadata and extract candidate information
-        const interviews = result.resources.map((video, index) => {
-            // Extract name from public_id: "interview-recordings/interview_John_Doe_1234567890"
-            const publicId = video.public_id;
-            const filename = publicId.split('/').pop() || '';
+        // Map Supabase data to the format expected by HRDashboard
+        const formattedInterviews = interviews.map((interview) => ({
+            id: interview.id,
+            name: interview.name,
+            email: interview.email, // Include email
+            videoUrl: interview.video_url,
+            publicId: interview.video_url ? interview.video_url.split('/').pop() : 'no-video', // Fallback
+            duration: 0, // Duration might not be stored, can be added if needed
+            format: 'webm', // Default
+            createdAt: interview.created_at,
+            bytes: 0, // Size might not be stored
+            role: interview.role,
+            status: interview.status,
+            result: interview.result
+        }));
 
-            // Parse the filename pattern: interview_Name_Timestamp
-            const parts = filename.replace('interview_', '').split('_');
-            const timestamp = parts.pop(); // Remove timestamp
-            const name = parts.join(' ').replace(/_/g, ' ') || 'Unknown Candidate';
-
-            return {
-                id: index + 1,
-                name: name,
-                videoUrl: video.secure_url,
-                publicId: video.public_id,
-                duration: video.duration || 0,
-                format: video.format || 'webm',
-                createdAt: video.created_at,
-                bytes: video.bytes,
-            };
-        });
-
-        // Sort by creation date (newest first)
-        interviews.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-        console.log(`✅ [GET-INTERVIEWS] Found ${interviews.length} interview videos`);
+        console.log(`✅ [GET-INTERVIEWS] Found ${formattedInterviews.length} interviews`);
 
         return res.status(200).json({
             success: true,
-            interviews,
-            count: interviews.length
+            interviews: formattedInterviews,
+            count: formattedInterviews.length
         });
 
     } catch (error) {
         console.error('❌ [GET-INTERVIEWS] Error:', error.message);
 
-        // Handle specific Cloudinary errors
-        if (error.http_code === 401) {
-            return res.status(401).json({ error: 'Invalid Cloudinary credentials' });
-        }
-
         return res.status(500).json({
             error: 'Failed to fetch interviews',
-            details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+            details: error.message || 'Unknown server error',
+            hint: 'Check server logs for more details'
         });
     }
 }

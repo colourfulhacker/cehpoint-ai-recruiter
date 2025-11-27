@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { supabase } from './lib/supabase';
 
 // Helper to check rate limit (simple in-memory for demo, but Vercel functions are stateless so this won't work perfectly across invocations. 
 // For production, use KV or similar. For now, we'll skip strict rate limiting or rely on Vercel's built-in protection if available, 
@@ -54,7 +55,7 @@ export default async function handler(req, res) {
     }
 
     // Validate input
-    const { name, role, language, status, notes, transcript, date, videoUrl } = req.body;
+    const { name, email, role, language, status, notes, transcript, date, videoUrl } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ error: 'Invalid name' });
@@ -68,66 +69,94 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Input too long' });
     }
 
-    // Google Sheets Auth
-    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'); // Handle newlines in env var
-    const sheetId = process.env.GOOGLE_SHEET_ID; // Optional if we search, but better to have
-
-    if (!clientEmail || !privateKey) {
-      throw new Error('Google Sheets credentials not configured (GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY)');
-    }
-
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: clientEmail,
-        private_key: privateKey,
-      },
-      scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly'],
-    });
-
-    const sheets = google.sheets({ version: 'v4', auth });
-
-    let targetSheetId = sheetId;
-
-    // If no sheet ID provided, try to find it (legacy behavior from server.js)
-    if (!targetSheetId) {
-      const drive = google.drive({ version: 'v3', auth });
-      const files = await drive.files.list({
-        q: "mimeType='application/vnd.google-apps.spreadsheet' and name='AI Recruiter Interview Results'",
-        spaces: 'drive',
-        fields: 'files(id, name)',
-        pageSize: 1
-      });
-
-      if (files.data.files && files.data.files.length > 0) {
-        targetSheetId = files.data.files[0].id;
-      } else {
-        throw new Error('Google Sheet "AI Recruiter Interview Results" not found and GOOGLE_SHEET_ID not set.');
-      }
-    }
-
-    // Append data (updated to include video URL in column H)
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: targetSheetId,
-      range: 'Sheet1!A:H',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [[
-          date || new Date().toISOString(),
-          name.trim(),
+    // --- 1. Save to Supabase ---
+    console.log('💾 Saving to Supabase...');
+    const { data, error: supabaseError } = await supabase
+      .from('interviews')
+      .insert([
+        {
+          name: name.trim(),
+          email: email ? email.trim() : null,
           role,
-          language || 'English',
-          status || 'Unknown',
-          notes || '',
-          transcript || '',
-          videoUrl || ''
-        ]]
+          language: language || 'English',
+          status: status || 'Unknown',
+          notes: notes || '',
+          transcript: transcript || [], // Store as JSON
+          video_url: videoUrl || '',
+          created_at: date || new Date().toISOString()
+        }
+      ])
+      .select();
+
+    if (supabaseError) {
+      console.error('❌ Supabase Error:', supabaseError);
+      // We don't fail the whole request if Supabase fails, we might still want to try Google Sheets or return partial success
+      // But for now, let's log it.
+    } else {
+      console.log('✅ Saved to Supabase:', data);
+    }
+
+    // --- 2. Save to Google Sheets (Legacy/Backup) ---
+    try {
+      const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+      const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+      const sheetId = process.env.GOOGLE_SHEET_ID;
+
+      if (clientEmail && privateKey) {
+        const auth = new google.auth.GoogleAuth({
+          credentials: {
+            client_email: clientEmail,
+            private_key: privateKey,
+          },
+          scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly'],
+        });
+
+        const sheets = google.sheets({ version: 'v4', auth });
+        let targetSheetId = sheetId;
+
+        if (!targetSheetId) {
+          // Try to find sheet if ID not provided
+          const drive = google.drive({ version: 'v3', auth });
+          const files = await drive.files.list({
+            q: "mimeType='application/vnd.google-apps.spreadsheet' and name='AI Recruiter Interview Results'",
+            spaces: 'drive',
+            fields: 'files(id, name)',
+            pageSize: 1
+          });
+          if (files.data.files && files.data.files.length > 0) {
+            targetSheetId = files.data.files[0].id;
+          }
+        }
+
+        if (targetSheetId) {
+          await sheets.spreadsheets.values.append({
+            spreadsheetId: targetSheetId,
+            range: 'Sheet1!A:I', // Extended range for email
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+              values: [[
+                date || new Date().toISOString(),
+                name.trim(),
+                email || '', // Add email to sheet
+                role,
+                language || 'English',
+                status || 'Unknown',
+                notes || '',
+                JSON.stringify(transcript).substring(0, 4000) || '', // Truncate for sheet
+                videoUrl || ''
+              ]]
+            }
+          });
+          console.log('✅ Saved to Google Sheets');
+        }
       }
-    });
+    } catch (sheetError) {
+      console.warn('⚠️ Google Sheets Error (Non-fatal):', sheetError.message);
+    }
 
     return res.status(200).json({
       result: 'success',
-      message: 'Saved to Google Sheets',
+      message: 'Saved to Supabase and Google Sheets',
       timestamp: new Date().toISOString()
     });
 

@@ -12,6 +12,7 @@
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
     "@google/genai": "^1.30.0",
+    "@supabase/supabase-js": "^2.86.0",
     "@types/node": "^24.10.1",
     "busboy": "^1.6.0",
     "cloudinary": "^2.5.1",

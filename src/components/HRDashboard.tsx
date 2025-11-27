@@ -4,6 +4,7 @@ import { Users, Video, Calendar, Loader2, AlertCircle, RefreshCcw, Play } from '
 interface Interview {
     id: number;
     name: string;
+    email?: string;
     videoUrl: string;
     publicId: string;
     duration: number;
@@ -160,7 +161,12 @@ export const HRDashboard: React.FC = () => {
                                             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold">
                                                 {interview.name.charAt(0).toUpperCase()}
                                             </div>
-                                            {interview.name}
+                                            <div>
+                                                <div>{interview.name}</div>
+                                                {interview.email && (
+                                                    <div className="text-sm text-slate-400 font-normal">{interview.email}</div>
+                                                )}
+                                            </div>
                                         </h3>
 
                                         <div className="flex flex-wrap gap-3 text-sm text-slate-400">
