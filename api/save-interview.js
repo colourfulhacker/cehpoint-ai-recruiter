@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { supabase } from './lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
 // Helper to check rate limit (simple in-memory for demo, but Vercel functions are stateless so this won't work perfectly across invocations. 
 // For production, use KV or similar. For now, we'll skip strict rate limiting or rely on Vercel's built-in protection if available, 
@@ -8,26 +8,31 @@ const requestCounts = new Map();
 
 function checkRateLimit(ip) {
   const now = Date.now();
-  const WINDOW = 60000;
-  const MAX = 10;
+  const windowStart = now - 60 * 1000; // 1 minute window
 
-  const data = requestCounts.get(ip);
-
-  if (!data || now - data.firstRequest > WINDOW) {
-    requestCounts.set(ip, { count: 1, firstRequest: now });
-    return { allowed: true, remaining: MAX - 1 };
+  // Clean up old entries
+  for (const [key, data] of requestCounts.entries()) {
+    if (data.timestamp < windowStart) {
+      requestCounts.delete(key);
+    }
   }
 
-  if (data.count >= MAX) {
-    return { allowed: false, remaining: 0 };
+  if (!requestCounts.has(ip)) {
+    requestCounts.set(ip, { count: 1, timestamp: now });
+    return true;
+  }
+
+  const data = requestCounts.get(ip);
+  if (data.count >= 5) { // Limit to 5 requests per minute per IP
+    return false;
   }
 
   data.count++;
-  return { allowed: true, remaining: MAX - data.count };
+  return true;
 }
 
 export default async function handler(req, res) {
-  // CORS handling
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -40,131 +45,130 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Rate limiting
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+
   try {
-    // Rate limiting
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-    // Note: In serverless, in-memory rate limiting is not reliable. 
-    // But we keep it as a basic check for the active instance.
-    const rateLimit = checkRateLimit(ip);
+    const { name, email, role, language, status, notes, transcript, videoUrl } = req.body;
 
-    if (!rateLimit.allowed) {
-      return res.status(429).json({
-        error: 'Too many requests',
-        retryAfter: 60
-      });
+    if (!name || !role) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Validate input
-    const { name, email, role, language, status, notes, transcript, date, videoUrl } = req.body;
+    const timestamp = new Date().toISOString();
+    let supabaseSuccess = false;
+    let sheetSuccess = false;
+    let errors = [];
 
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return res.status(400).json({ error: 'Invalid name' });
-    }
-
-    if (!role || typeof role !== 'string') {
-      return res.status(400).json({ error: 'Invalid role' });
-    }
-
-    if (name.length > 200 || (transcript && transcript.length > 50000)) {
-      return res.status(400).json({ error: 'Input too long' });
-    }
-
-    // --- 1. Save to Supabase ---
-    console.log('💾 Saving to Supabase...');
-    const { data, error: supabaseError } = await supabase
-      .from('interviews')
-      .insert([
-        {
-          name: name.trim(),
-          email: email ? email.trim() : null,
-          role,
-          language: language || 'English',
-          status: status || 'Unknown',
-          notes: notes || '',
-          transcript: transcript || [], // Store as JSON
-          video_url: videoUrl || '',
-          created_at: date || new Date().toISOString()
-        }
-      ])
-      .select();
-
-    if (supabaseError) {
-      console.error('❌ Supabase Error:', supabaseError);
-      // We don't fail the whole request if Supabase fails, we might still want to try Google Sheets or return partial success
-      // But for now, let's log it.
-    } else {
-      console.log('✅ Saved to Supabase:', data);
-    }
-
-    // --- 2. Save to Google Sheets (Legacy/Backup) ---
+    // 1. Save to Supabase (Primary)
     try {
-      const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-      const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-      const sheetId = process.env.GOOGLE_SHEET_ID;
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-      if (clientEmail && privateKey) {
+      if (supabaseUrl && supabaseAnonKey) {
+        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+        const { error: supabaseError } = await supabase
+          .from('interviews')
+          .insert([
+            {
+              name,
+              email,
+              role,
+              language,
+              status,
+              notes,
+              transcript, // Supabase handles JSONB automatically
+              video_url: videoUrl,
+              result: status // Map status to result column if needed
+            }
+          ]);
+
+        if (supabaseError) {
+          console.error('❌ Supabase Save Error:', supabaseError);
+          errors.push(`Supabase: ${supabaseError.message}`);
+        } else {
+          supabaseSuccess = true;
+          console.log('✅ Saved to Supabase');
+        }
+      } else {
+        console.warn('⚠️ Supabase credentials missing, skipping Supabase save');
+        errors.push('Supabase: Credentials missing');
+      }
+    } catch (err) {
+      console.error('❌ Supabase Exception:', err);
+      errors.push(`Supabase Exception: ${err.message}`);
+    }
+
+    // 2. Save to Google Sheets (Backup)
+    try {
+      if (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
         const auth = new google.auth.GoogleAuth({
           credentials: {
-            client_email: clientEmail,
-            private_key: privateKey,
+            client_email: process.env.GOOGLE_CLIENT_EMAIL,
+            private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
           },
-          scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly'],
+          scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
 
         const sheets = google.sheets({ version: 'v4', auth });
-        let targetSheetId = sheetId;
 
-        if (!targetSheetId) {
-          // Try to find sheet if ID not provided
-          const drive = google.drive({ version: 'v3', auth });
-          const files = await drive.files.list({
-            q: "mimeType='application/vnd.google-apps.spreadsheet' and name='AI Recruiter Interview Results'",
-            spaces: 'drive',
-            fields: 'files(id, name)',
-            pageSize: 1
-          });
-          if (files.data.files && files.data.files.length > 0) {
-            targetSheetId = files.data.files[0].id;
-          }
-        }
+        // Format transcript for Sheets (as string)
+        const transcriptText = Array.isArray(transcript)
+          ? transcript.map(t => `[${t.timestamp}] ${t.speaker}: ${t.text}`).join('\n')
+          : (typeof transcript === 'string' ? transcript : JSON.stringify(transcript));
 
-        if (targetSheetId) {
-          await sheets.spreadsheets.values.append({
-            spreadsheetId: targetSheetId,
-            range: 'Sheet1!A:I', // Extended range for email
-            valueInputOption: 'USER_ENTERED',
-            requestBody: {
-              values: [[
-                date || new Date().toISOString(),
-                name.trim(),
-                email || '', // Add email to sheet
-                role,
-                language || 'English',
-                status || 'Unknown',
-                notes || '',
-                JSON.stringify(transcript).substring(0, 4000) || '', // Truncate for sheet
-                videoUrl || ''
-              ]]
-            }
-          });
-          console.log('✅ Saved to Google Sheets');
-        }
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: process.env.GOOGLE_SHEET_ID,
+          range: 'Sheet1!A:I', // Adjusted range for new columns
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [[
+              timestamp,
+              name,
+              email || '', // Add email column
+              role,
+              language || 'English',
+              status,
+              notes,
+              transcriptText,
+              videoUrl || ''
+            ]],
+          },
+        });
+        sheetSuccess = true;
+        console.log('✅ Saved to Google Sheets');
+      } else {
+        console.warn('⚠️ Google Sheets credentials missing, skipping Sheets save');
       }
-    } catch (sheetError) {
-      console.warn('⚠️ Google Sheets Error (Non-fatal):', sheetError.message);
+    } catch (err) {
+      console.error('❌ Google Sheets Save Error:', err);
+      // Don't fail the request if just Sheets fails, as long as Supabase worked or we want to return partial success
+      errors.push(`Sheets: ${err.message}`);
+    }
+
+    if (!supabaseSuccess && !sheetSuccess) {
+      return res.status(500).json({
+        error: 'Failed to save to both Supabase and Google Sheets',
+        details: errors
+      });
     }
 
     return res.status(200).json({
-      result: 'success',
-      message: 'Saved to Supabase and Google Sheets',
-      timestamp: new Date().toISOString()
+      success: true,
+      message: 'Interview saved successfully',
+      sources: {
+        supabase: supabaseSuccess,
+        sheets: sheetSuccess
+      },
+      errors: errors.length > 0 ? errors : undefined
     });
 
   } catch (error) {
-    console.error('API Error:', error.message);
-    return res.status(500).json({
-      error: 'Failed to save data',
-      details: error.message
-    });
+    console.error('❌ Save Interview Error:', error);
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 }
