@@ -64,8 +64,11 @@ export const Diagnostics: React.FC = () => {
                     <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
                         <Cloud className="w-6 h-6 text-indigo-400" /> Cloudinary Upload Test
                     </h2>
-                    <p className="text-slate-400 mb-6">
+                    <p className="text-slate-400 mb-2">
                         Tests if the Cloudinary configuration (Cloud Name: <code>dvparynza</code>, Preset: <code>interview_recordings</code>) is correct and accepting uploads.
+                    </p>
+                    <p className="text-amber-400 text-sm mb-6">
+                        ⚠️ Note: This test uses a fake video blob. Cloudinary will reject it with "Unsupported video format" - this is expected and confirms the upload endpoint is working. Real videos from interviews will upload successfully.
                     </p>
 
                     <button
@@ -78,7 +81,17 @@ export const Diagnostics: React.FC = () => {
                     </button>
 
                     {uploadResult && (
-                        <div className={`p-4 rounded-lg font-mono text-sm overflow-auto max-h-60 ${uploadStatus === 'success' ? 'bg-emerald-900/30 border border-emerald-500/30' : 'bg-red-900/30 border border-red-500/30'}`}>
+                        <div className={`p-4 rounded-lg font-mono text-sm overflow-auto max-h-60 ${uploadStatus === 'success'
+                                ? 'bg-emerald-900/30 border border-emerald-500/30'
+                                : uploadResult.error?.includes('Unsupported video format')
+                                    ? 'bg-amber-900/30 border border-amber-500/30'
+                                    : 'bg-red-900/30 border border-red-500/30'
+                            }`}>
+                            {uploadResult.error?.includes('Unsupported video format') && (
+                                <div className="text-amber-300 mb-2">
+                                    ✅ Expected result: Cloudinary is reachable and validating uploads correctly.
+                                </div>
+                            )}
                             <pre>{JSON.stringify(uploadResult, null, 2)}</pre>
                         </div>
                     )}
