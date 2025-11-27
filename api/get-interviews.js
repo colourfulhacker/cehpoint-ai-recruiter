@@ -1,4 +1,4 @@
-import { supabase } from './lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
 /**
  * API endpoint to fetch all interview videos from Supabase
@@ -27,20 +27,26 @@ export default async function handler(req, res) {
             urlPrefix: process.env.SUPABASE_URL?.substring(0, 20)
         });
 
-        if (!supabase) {
-            console.error('❌ [GET-INTERVIEWS] Supabase client not initialized (missing env vars)');
+        // Create Supabase client inline
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+        if (!supabaseUrl || !supabaseAnonKey) {
+            console.error('❌ [GET-INTERVIEWS] Supabase credentials missing');
             return res.status(503).json({
                 error: 'Database configuration missing',
                 details: 'SUPABASE_URL or SUPABASE_ANON_KEY not set',
                 env: {
-                    hasUrl: !!process.env.SUPABASE_URL,
-                    hasKey: !!process.env.SUPABASE_ANON_KEY
+                    hasUrl: !!supabaseUrl,
+                    hasKey: !!supabaseAnonKey
                 }
             });
         }
 
-        console.log('📊 [GET-INTERVIEWS] Supabase client initialized, querying...');
+        console.log('📊 [GET-INTERVIEWS] Creating Supabase client...');
+        const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+        console.log('📊 [GET-INTERVIEWS] Querying interviews table...');
         const { data: interviews, error } = await supabase
             .from('interviews')
             .select('*')
