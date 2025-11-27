@@ -11,6 +11,19 @@ interface InterviewScreenProps {
 
 const API_KEY = process.env.API_KEY || '';
 
+const notifyResultFunc: FunctionDeclaration = {
+    name: "notifyResult",
+    description: "Notify the system about the interview result (pass/fail) and the reason.",
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            passed: { type: Type.BOOLEAN, description: "True if candidate passed, False if failed." },
+            reason: { type: Type.STRING, description: "Detailed reason for the decision." }
+        },
+        required: ["passed", "reason"]
+    }
+};
+
 export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComplete }) => {
     // --- UI State ---
     const [isSessionActive, setIsSessionActive] = useState(false);
@@ -28,183 +41,146 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
-    const processorRef = useRef<ScriptProcessorNode | null>(null);
+    const audioMixerRef = useRef<MediaStreamAudioDestinationNode | null>(null);
     const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const analyzerRef = useRef<AnalyserNode | null>(null);
-
     const sessionRef = useRef<any>(null);
-    const isIntentionalCloseRef = useRef<boolean>(false);
-
-    // Transcript State
     const transcriptRef = useRef<TranscriptEntry[]>([]);
     const currentInputRef = useRef<string>("");
     const currentAiRef = useRef<string>("");
-
-    // Reconnection Logic
-    const retryCountRef = useRef<number>(0);
-    const retryTimeoutRef = useRef<any>(null);
-    const connectStartTimeRef = useRef<number>(0);
-
-    // Audio Playback
-    const nextStartTimeRef = useRef<number>(0);
-    // Logic / Monitoring
-    const lastUserSpeechTimeRef = useRef<number>(Date.now());
     const isAiSpeakingRef = useRef<boolean>(false);
-    const silenceCheckIntervalRef = useRef<any>(null);
+    const nextStartTimeRef = useRef<number>(0);
     const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+    const retryCountRef = useRef<number>(0);
+    const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const isIntentionalCloseRef = useRef<boolean>(false);
+    const connectStartTimeRef = useRef<number>(0);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const videoChunksRef = useRef<Blob[]>([]);
     const recordedVideoBlobRef = useRef<Blob | null>(null);
-    const audioMixerRef = useRef<MediaStreamAudioDestinationNode | null>(null); // For mixing AI audio into recording
+    const processorRef = useRef<ScriptProcessorNode | null>(null);
+
+    // 🛡️ Safety Refs
+    const aiDecisionRef = useRef<{ passed: boolean; reason: string } | null>(null);
+    const hasCalledNotifyRef = useRef<boolean>(false);
+    const pcmBufferRef = useRef<Float32Array>(new Float32Array(0));
+    const questionCountRef = useRef<number>(0);
+    const lastUserSpeechTimeRef = useRef<number>(0);
     const strikeCountRef = useRef<number>(0);
     const animationFrameRef = useRef<number | null>(null);
-    const pcmBufferRef = useRef<Float32Array>(new Float32Array(0)); // Buffer for audio batching
 
-    // Interview tracking for smart decision-making
-    const questionCountRef = useRef<number>(0);
-    const poorAnswerCountRef = useRef<number>(0);
-    const strongAnswerCountRef = useRef<number>(0);
-    const hasCalledNotifyRef = useRef<boolean>(false); // Prevent multiple notifyResult calls
+    // --- HOISTED HELPER FUNCTIONS (Defined early to avoid hoisting issues) ---
 
-    // Hide instruction banner after 4 seconds when connected
-    useEffect(() => {
-        if (connectionState === 'connected' && showInstructionBanner) {
-            const timer = setTimeout(() => {
-                setShowInstructionBanner(false);
-            }, 4000);
-            return () => clearTimeout(timer);
-        }
-    }, [connectionState, showInstructionBanner]);
-
-    // Save interview state to localStorage for data loss prevention
     const saveToLocalStorage = (data: any) => {
         try {
-            localStorage.setItem(`interview_${config.name}_${Date.now()}`, JSON.stringify(data));
+            const key = `interview_data_${Date.now()}`;
+            localStorage.setItem(key, JSON.stringify(data));
         } catch (e) {
-            console.warn("Failed to save to localStorage", e);
+            console.error("Failed to save to localStorage", e);
         }
     };
-
-    // Before page unload, save data
-    useEffect(() => {
-        const handleBeforeUnload = () => {
-            if (transcriptRef.current.length > 0) {
-                saveToLocalStorage({ config, transcript: transcriptRef.current, timestamp: new Date().toISOString() });
-            }
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, []);
-
-    // --- Tools Definition ---
-    const notifyResultFunc: FunctionDeclaration = {
-        name: 'notifyResult',
-        description: 'Call this function IMMEDIATELY when you have made a decision. Do not wait for the user to respond. This triggers the result screen.',
-        parameters: {
-            type: Type.OBJECT,
-            properties: {
-                passed: { type: Type.BOOLEAN },
-                reason: { type: Type.STRING }
-            },
-            required: ['passed', 'reason'],
-        },
-    };
-
-    // --- 1. Timer (5 minutes hard limit, then force conclusion) ---
-    useEffect(() => {
-        let timer: any;
-        if (connectionState === 'connected' && timeLeft > 0 && !showContactOverlay) {
-            timer = setInterval(() => setTimeLeft((p) => p - 1), 1000);
-        } else if (timeLeft === 0 && !showContactOverlay) {
-            // 5 minutes up - force conclusion
-            if (!hasCalledNotifyRef.current) {
-                sessionRef.current?.send({
-                    parts: [{ text: "[SYSTEM: 5 minute limit reached. Make final decision NOW. Call notifyResult with your decision.]" }]
-                });
-            }
-        }
-        return () => clearInterval(timer);
-    }, [connectionState, timeLeft, showContactOverlay]);
-
-    // --- 2. Silence Monitor ---
-    useEffect(() => {
-        if (connectionState === 'connected') {
-            silenceCheckIntervalRef.current = setInterval(() => {
-                if (isIntentionalCloseRef.current) return;
-                const timeSinceSpeech = Date.now() - lastUserSpeechTimeRef.current;
-
-                // 15 seconds of silence (increased from 8s to prevent premature timeouts) + AI not talking
-                if (timeSinceSpeech > 15000 && !isAiSpeakingRef.current) {
-                    strikeCountRef.current += 1;
-                    lastUserSpeechTimeRef.current = Date.now(); // Reset to give them a chance
-
-                    console.log(`⚠️ Silence detected. Strike: ${strikeCountRef.current}/3`);
-
-                    if (strikeCountRef.current >= 3) {
-                        sessionRef.current?.send({ parts: [{ text: "[SYSTEM: Candidate unresponsive 3x. Fail them now. Say 'I am ending this due to lack of response' and call notifyResult(false, 'Unresponsive').]" }] });
-                    } else {
-                        sessionRef.current?.send({ parts: [{ text: `[SYSTEM: Silence detected (${strikeCountRef.current}/3). Ask: 'Are you still there?']` }] });
-                    }
-                }
-            }, 1000);
-        }
-        return () => clearInterval(silenceCheckIntervalRef.current);
-    }, [connectionState]);
-
-    // --- 3. Lifecycle Cleanup ---
-    useEffect(() => {
-        return () => {
-            cleanup();
-        };
-    }, []);
 
     const cleanup = () => {
         isIntentionalCloseRef.current = true;
-        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
-        if (silenceCheckIntervalRef.current) clearInterval(silenceCheckIntervalRef.current);
-        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-
-        // Stop Video Recording
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            try {
-                mediaRecorderRef.current.stop();
-            } catch (e) {
-                console.warn('MediaRecorder stop error:', e);
-            }
+        if (sessionRef.current) {
+            try { sessionRef.current.close(); } catch (e) { }
+            sessionRef.current = null;
         }
-
-        // Stop Media Stream
         if (streamRef.current) {
-            streamRef.current.getTracks().forEach(t => t.stop());
+            streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
         }
-
-        // Stop Audio Nodes
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current.onaudioprocess = null;
-            processorRef.current = null;
-        }
-        if (sourceRef.current) {
-            sourceRef.current.disconnect();
-            sourceRef.current = null;
-        }
-        if (analyzerRef.current) {
-            analyzerRef.current = null;
-        }
-
-        // Close Audio Context
         if (audioContextRef.current) {
-            audioContextRef.current.close().catch(e => console.warn("Ctx close err", e));
+            try { audioContextRef.current.close(); } catch (e) { }
             audioContextRef.current = null;
         }
+        if (retryTimeoutRef.current) {
+            clearTimeout(retryTimeoutRef.current);
+            retryTimeoutRef.current = null;
+        }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+    };
 
-        // Stop all playing audio
-        sourcesRef.current.forEach(s => { try { s.stop(); } catch (e) { } });
-        sourcesRef.current.clear();
+    const flushTranscriptBuffers = () => {
+        if (currentInputRef.current.trim()) {
+            transcriptRef.current.push({
+                speaker: 'user',
+                text: currentInputRef.current.trim(),
+                timestamp: new Date().toLocaleTimeString()
+            });
+            currentInputRef.current = "";
+        }
+        if (currentAiRef.current.trim()) {
+            transcriptRef.current.push({
+                speaker: 'ai',
+                text: currentAiRef.current.trim(),
+                timestamp: new Date().toLocaleTimeString()
+            });
+            currentAiRef.current = "";
+        }
+    };
 
-        // Cleanup session ref
-        sessionRef.current = null;
+    const finalizeEndSession = (passed: boolean, reason?: string) => {
+        // Save to localStorage for data loss prevention
+        saveToLocalStorage({ config, transcript: transcriptRef.current, result: { passed, reason }, timestamp: new Date().toISOString() });
+
+        cleanup();
+
+        // IMMEDIATE result screen appearance - BOTH rejection AND selection now - NO DELAYS
+        setShowContactOverlay(true);
+        console.log(passed ? "✅ SELECTION" : "❌ REJECTION", "- Result screen NOW");
+
+        const videoBlob = recordedVideoBlobRef.current || undefined;
+        console.log("🎬 [VIDEO] Passing to ResultScreen:", videoBlob ? `${videoBlob.size} bytes, type: ${videoBlob.type}` : 'NO VIDEO BLOB');
+
+        // ZERO delay - show result immediately with video blob
+        onComplete({
+            passed,
+            notes: reason,
+            transcript: transcriptRef.current,
+            videoBlob: videoBlob
+        });
+    };
+
+    const handleEndSession = (passed: boolean, reason?: string) => {
+        if (showContactOverlay) return; // Already ending
+
+        console.log("📊 Interview Ending - Result:", { passed, reason });
+        console.log("🎬 [VIDEO] MediaRecorder state:", mediaRecorderRef.current?.state);
+        console.log("🎬 [VIDEO] Current video blob:", recordedVideoBlobRef.current ? `${recordedVideoBlobRef.current.size} bytes` : 'null');
+
+        // Ensure we capture the last things said
+        flushTranscriptBuffers();
+
+        // Stop video recording and wait for blob
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            console.log("🎬 [VIDEO] Stopping MediaRecorder...");
+            mediaRecorderRef.current.stop();
+            // Give a brief moment for onstop to fire and create the blob
+            setTimeout(() => {
+                console.log("🎬 [VIDEO] After timeout, video blob:", recordedVideoBlobRef.current ? `${recordedVideoBlobRef.current.size} bytes` : 'null');
+                finalizeEndSession(passed, reason);
+            }, 500);
+        } else {
+            console.log("🎬 [VIDEO] MediaRecorder already inactive or null");
+            finalizeEndSession(passed, reason);
+        }
+    };
+
+    const handleManualEnd = () => {
+        if (aiDecisionRef.current) {
+            console.log('🛡 AI decision exists, using that instead');
+            handleEndSession(aiDecisionRef.current.passed, aiDecisionRef.current.reason);
+        } else {
+            console.log('⚠ Manual termination by user');
+            handleEndSession(false, "Terminated by candidate");
+        }
     };
 
     // Tab Switching Detection - Security Feature
@@ -240,6 +216,39 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [isSessionActive]);
+
+    // Hard Timer Expiration
+    useEffect(() => {
+        if (timeLeft === 0 && !showContactOverlay && !hasCalledNotifyRef.current) {
+            const forceEndTimer = setTimeout(() => {
+                if (!hasCalledNotifyRef.current) {
+                    console.log('⏱ HARD TIMEOUT: Timer expired, forcing result page');
+                    handleEndSession(false, 'Interview time limit reached (10 minutes)');
+                }
+            }, 3000); // 3 second grace period
+            return () => clearTimeout(forceEndTimer);
+        }
+    }, [timeLeft, showContactOverlay]);
+
+    // Timer Countdown
+    useEffect(() => {
+        if (isSessionActive && timeLeft > 0 && !showContactOverlay) {
+            const timer = setInterval(() => {
+                setTimeLeft((prev) => prev - 1);
+            }, 1000);
+            return () => clearInterval(timer);
+        }
+    }, [isSessionActive, timeLeft, showContactOverlay]);
+
+    // Auto-hide instruction banner after 4 seconds
+    useEffect(() => {
+        if (isSessionActive && showInstructionBanner) {
+            const timer = setTimeout(() => {
+                setShowInstructionBanner(false);
+            }, 4000);
+            return () => clearTimeout(timer);
+        }
+    }, [isSessionActive, showInstructionBanner]);
 
     const startInterview = async () => {
         setIsSessionActive(true);
@@ -375,9 +384,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                     });
 
                     // Detect user speech activity for silence monitoring
-                    // CRITICAL FIX: Use a lower threshold here (10 instead of 20) to detect speech 
-                    // even if it's too quiet for the noise gate to pass to Gemini.
-                    // This prevents "Are you still there?" prompts when the user IS speaking but quietly.
                     if (avg > 10) {
                         lastUserSpeechTimeRef.current = Date.now();
                         strikeCountRef.current = 0;
@@ -407,50 +413,25 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
             updateVisualizers();
 
             // 4. Setup Processor - ULTRA LOW LATENCY
-            // 512 buffer = minimum latency (8.3ms processing window at 16kHz)
-            // This is the most aggressive setting for real-time response
             const processor = ctx.createScriptProcessor(512, 1, 1);
             processorRef.current = processor;
 
             processor.onaudioprocess = (e) => {
                 if (isIntentionalCloseRef.current) return;
-                // Only process if we have an active session
                 if (!sessionRef.current) return;
 
                 const inputData = e.inputBuffer.getChannelData(0);
 
                 // --- AUDIO BATCHING FOR LATENCY OPTIMIZATION ---
-                // Instead of sending every 512 samples (32ms), we accumulate them.
-                // Sending too frequently clogs the WebSocket and causes massive latency (10s+).
-                // We'll batch ~4096 samples (approx 256ms) which is a sweet spot for 
-                // low network overhead vs. reasonable capture latency.
-
-                // 1. Append new data to buffer
                 const newBuffer = new Float32Array(pcmBufferRef.current.length + inputData.length);
                 newBuffer.set(pcmBufferRef.current);
                 newBuffer.set(inputData, pcmBufferRef.current.length);
                 pcmBufferRef.current = newBuffer;
 
-                // 2. Check if we have enough data to send (2048 samples = ~128ms at 16kHz)
-                // Reduced from 4096 to improve responsiveness while still batching.
                 if (pcmBufferRef.current.length >= 2048) {
                     const chunkToSend = pcmBufferRef.current;
                     pcmBufferRef.current = new Float32Array(0); // Reset buffer
 
-                    // REMOVED VAD CHECK: The previous VAD was too aggressive on batches, 
-                    // causing "not responding" issues if speech was mixed with silence.
-                    // We now send ALL audio chunks to ensure the AI hears everything.
-
-                    /* 
-                    let sum = 0;
-                    for (let i = 0; i < chunkToSend.length; i++) {
-                        sum += chunkToSend[i] * chunkToSend[i];
-                    }
-                    const rms = Math.sqrt(sum / chunkToSend.length);
-                    if (rms < 0.002) return; 
-                    */
-
-                    // Send the batched chunk
                     const pcmBlob = createPcmBlob(chunkToSend);
                     try {
                         sessionRef.current.sendRealtimeInput({ media: pcmBlob });
@@ -494,7 +475,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                         audioContextRef.current.resume();
                     }
 
-                    // AI will greet automatically based on system prompt instruction
                     console.log("🎯 AI will start speaking based on system prompt");
                 },
                 onmessage: async (msg: LiveServerMessage) => {
@@ -502,8 +482,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                 },
                 onclose: (e: any) => {
                     console.log("🔴 Gemini Connection Closed", e);
-
-                    // Critical Fix: If the connection closes instantly (<1s), it's a configuration error.
                     if (Date.now() - connectStartTimeRef.current < 1000) {
                         setConnectionState('error');
                         setErrorMsg("Connection rejected. Please check API Key or Network.");
@@ -522,7 +500,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                 speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
                 systemInstruction: getSystemPrompt(),
                 tools: [{ functionDeclarations: [notifyResultFunc] }],
-                // Enable Transcription: Use empty objects as per SDK docs
                 inputAudioTranscription: {},
                 outputAudioTranscription: {},
             }
@@ -532,12 +509,9 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
             const session = await ai.live.connect(configObj);
             sessionRef.current = session;
 
-            // 🎯 KICKSTART: Send a COMMAND to FORCE the AI to speak immediately
-            // This guarantees the conversation starts even if the model is waiting for input
             setTimeout(() => {
                 console.log("🚀 Sending kickstart command to AI...");
                 if (sessionRef.current) {
-                    // Send a direct command that the AI must respond to
                     sessionRef.current.send({
                         parts: [{
                             text: "START SPEAKING NOW. Greet the candidate immediately with your introduction as instructed in the system prompt."
@@ -593,7 +567,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
             nextStartTimeRef.current = 0;
             isAiSpeakingRef.current = false;
 
-            // Commit partial AI transcript if interrupted
             if (currentAiRef.current.trim()) {
                 transcriptRef.current.push({
                     speaker: 'ai',
@@ -605,7 +578,7 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
             return;
         }
 
-        // 1. Turn Complete -> Commit Transcripts (MINIMAL processing for latency)
+        // 1. Turn Complete -> Commit Transcripts
         if (serverContent?.turnComplete) {
             if (currentInputRef.current.trim()) {
                 transcriptRef.current.push({
@@ -637,10 +610,9 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                 const source = audioContextRef.current.createBufferSource();
                 source.buffer = buffer;
 
-                // Connect AI audio to BOTH speaker output AND the mixer for recording
-                source.connect(audioContextRef.current.destination); // For user to hear
+                source.connect(audioContextRef.current.destination);
                 if (audioMixerRef.current) {
-                    source.connect(audioMixerRef.current); // For video recording
+                    source.connect(audioMixerRef.current);
                 }
 
                 source.onended = () => {
@@ -648,7 +620,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                     if (sourcesRef.current.size === 0) isAiSpeakingRef.current = false;
                 };
 
-                // Schedule
                 const ctxTime = audioContextRef.current.currentTime;
                 let start = nextStartTimeRef.current;
                 if (start < ctxTime) start = ctxTime;
@@ -668,14 +639,15 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                 if (fc.name === 'notifyResult') {
                     const { passed, reason } = fc.args as any;
 
-                    // Prevent multiple notifyResult calls
                     if (hasCalledNotifyRef.current) {
                         console.warn("notifyResult already called, ignoring duplicate");
                         return;
                     }
+
+                    // 🔒 Store AI's decision IMMEDIATELY
+                    aiDecisionRef.current = { passed, reason };
                     hasCalledNotifyRef.current = true;
 
-                    // Ack
                     sessionRef.current?.sendToolResponse({
                         functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } }
                     });
@@ -684,72 +656,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                 }
             }
         }
-    };
-
-    const flushTranscriptBuffers = () => {
-        if (currentInputRef.current.trim()) {
-            transcriptRef.current.push({
-                speaker: 'user',
-                text: currentInputRef.current.trim(),
-                timestamp: new Date().toLocaleTimeString()
-            });
-            currentInputRef.current = "";
-        }
-        if (currentAiRef.current.trim()) {
-            transcriptRef.current.push({
-                speaker: 'ai',
-                text: currentAiRef.current.trim(),
-                timestamp: new Date().toLocaleTimeString()
-            });
-            currentAiRef.current = "";
-        }
-    };
-
-    const handleEndSession = (passed: boolean, reason?: string) => {
-        if (showContactOverlay) return; // Already ending
-
-        console.log("📊 Interview Ending - Result:", { passed, reason });
-        console.log("🎬 [VIDEO] MediaRecorder state:", mediaRecorderRef.current?.state);
-        console.log("🎬 [VIDEO] Current video blob:", recordedVideoBlobRef.current ? `${recordedVideoBlobRef.current.size} bytes` : 'null');
-
-        // Ensure we capture the last things said
-        flushTranscriptBuffers();
-
-        // Stop video recording and wait for blob
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            console.log("🎬 [VIDEO] Stopping MediaRecorder...");
-            mediaRecorderRef.current.stop();
-            // Give a brief moment for onstop to fire and create the blob
-            setTimeout(() => {
-                console.log("🎬 [VIDEO] After timeout, video blob:", recordedVideoBlobRef.current ? `${recordedVideoBlobRef.current.size} bytes` : 'null');
-                finalizeEndSession(passed, reason);
-            }, 500);
-        } else {
-            console.log("🎬 [VIDEO] MediaRecorder already inactive or null");
-            finalizeEndSession(passed, reason);
-        }
-    };
-
-    const finalizeEndSession = (passed: boolean, reason?: string) => {
-        // Save to localStorage for data loss prevention
-        saveToLocalStorage({ config, transcript: transcriptRef.current, result: { passed, reason }, timestamp: new Date().toISOString() });
-
-        cleanup();
-
-        // IMMEDIATE result screen appearance - BOTH rejection AND selection now - NO DELAYS
-        setShowContactOverlay(true);
-        console.log(passed ? "✅ SELECTION" : "❌ REJECTION", "- Result screen NOW");
-
-        const videoBlob = recordedVideoBlobRef.current || undefined;
-        console.log("🎬 [VIDEO] Passing to ResultScreen:", videoBlob ? `${videoBlob.size} bytes, type: ${videoBlob.type}` : 'NO VIDEO BLOB');
-
-        // ZERO delay - show result immediately with video blob
-        onComplete({
-            passed,
-            notes: reason,
-            transcript: transcriptRef.current,
-            videoBlob: videoBlob
-        });
     };
 
     // Language-specific professional greetings
@@ -763,203 +669,203 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     };
 
     const getSystemPrompt = () => `
-    Identity: You are Sarah, a Senior Tech Recruiter with 10+ years of hiring experience at C-E-H point.
-    Candidate: ${config.name}
-    Position: ${config.role}
-    Language: ${config.language} (SPEAK ONLY IN THIS LANGUAGE)
-    
-    ===== CRITICAL: START SPEAKING IMMEDIATELY =====
-    🎯 FIRST ACTION: When this session starts, YOU MUST IMMEDIATELY greet the candidate with your introduction.
-    DO NOT WAIT for the candidate to speak first. YOU speak first to start the conversation.
-    Your opening line should be: "${getLanguageGreeting(config.language)}"
-    After greeting, wait for their response, then begin asking questions.
-    
-    ${JOB_DESCRIPTIONS[config.role]}
+        Identity: You are Sarah, a Senior Tech Recruiter with 10+ years of hiring experience at C-E-H point.
+        Candidate: ${config.name}
+        Position: ${config.role}
+        Language: ${config.language} (SPEAK ONLY IN THIS LANGUAGE)
+        
+        ===== CRITICAL: START SPEAKING IMMEDIATELY =====
+        🎯 FIRST ACTION: When this session starts, YOU MUST IMMEDIATELY greet the candidate with your introduction.
+        DO NOT WAIT for the candidate to speak first. YOU speak first to start the conversation.
+        Your opening line should be: "${getLanguageGreeting(config.language)}"
+        After greeting, wait for their response, then begin asking questions.
+        
+        ${JOB_DESCRIPTIONS[config.role]}
 
-    ===== CRITICAL EXECUTION RULES (MUST FOLLOW STRICTLY) =====
-    
-    1. **IMMEDIATE FEEDBACK AFTER EVERY ANSWER (MANDATORY):**
-       After the candidate answers EACH question, you MUST immediately provide SHORT, DIRECT feedback BEFORE asking the next question.
-       
-       ✅ If answer is CORRECT/STRONG (specific, detailed, shows real experience):
-          - "Excellent! That's exactly what I wanted to hear."
-          - "Great answer! You clearly have hands-on experience."
-          - "Perfect. That shows strong understanding."
-          - "Nice! I can see you've worked on real projects."
-       
-       ❌ If answer is INCORRECT/WEAK/VAGUE (generic, no specifics, wrong facts):
-          - "That's not quite right. I was looking for [specific concept]."
-          - "You're dodging the question. I need a specific example."
-          - "That sounds like a textbook definition. Tell me about a REAL project."
-          - "Incorrect. The right approach would be [brief explanation]."
-          - "That's too generic. Which specific tool did you use? What was the project?"
-       
-       ⚠️ IMPORTANT: Do not tolerate vague answers. If they are generic, call them out immediately. Be a REAL HR who demands substance.
-       
-    2. **SCAM-STYLE ANSWER DETECTION (IMMEDIATE FAIL/STRIKE):**
-       The following types of answers MUST be marked incorrect immediately:
-       - **Repeating the question** in different words.
-       - **Describing the topic** instead of answering the question (e.g., "This is cyber security" when asked "What are the steps of cyber security?").
-       - **Positive-but-empty answers** (e.g., "This is how we do software development", "Cyber security protects data", "I know everything about it").
-       - **Answers without explanation** (e.g., "Yes I have hands-on", "I already did this before", "I am very confident in this area").
-       - **Answers that focus on motivation** rather than substance.
-       - **Buzzword-throwing** without steps, examples, or reasoning.
-       
-       If you detect ANY of these, immediately say:
-       "That answer doesn't tell me anything. You're just repeating the topic or giving a generic statement. I need specific steps or examples."
-       Mark it as INCORRECT.
+        ===== CRITICAL EXECUTION RULES (MUST FOLLOW STRICTLY) =====
+        
+        1. **IMMEDIATE FEEDBACK AFTER EVERY ANSWER (MANDATORY):**
+           After the candidate answers EACH question, you MUST immediately provide SHORT, DIRECT feedback BEFORE asking the next question.
+           
+           ✅ If answer is CORRECT/STRONG (specific, detailed, shows real experience):
+              - "Excellent! That's exactly what I wanted to hear."
+              - "Great answer! You clearly have hands-on experience."
+              - "Perfect. That shows strong understanding."
+              - "Nice! I can see you've worked on real projects."
+           
+           ❌ If answer is INCORRECT/WEAK/VAGUE (generic, no specifics, wrong facts):
+              - "That's not quite right. I was looking for [specific concept]."
+              - "You're dodging the question. I need a specific example."
+              - "That sounds like a textbook definition. Tell me about a REAL project."
+              - "Incorrect. The right approach would be [brief explanation]."
+              - "That's too generic. Which specific tool did you use? What was the project?"
+           
+           ⚠️ IMPORTANT: Do not tolerate vague answers. If they are generic, call them out immediately. Be a REAL HR who demands substance.
+           
+        2. **SCAM-STYLE ANSWER DETECTION (IMMEDIATE FAIL/STRIKE):**
+           The following types of answers MUST be marked incorrect immediately:
+           - **Repeating the question** in different words.
+           - **Describing the topic** instead of answering the question (e.g., "This is cyber security" when asked "What are the steps of cyber security?").
+           - **Positive-but-empty answers** (e.g., "This is how we do software development", "Cyber security protects data", "I know everything about it").
+           - **Answers without explanation** (e.g., "Yes I have hands-on", "I already did this before", "I am very confident in this area").
+           - **Answers that focus on motivation** rather than substance.
+           - **Buzzword-throwing** without steps, examples, or reasoning.
+           
+           If you detect ANY of these, immediately say:
+           "That answer doesn't tell me anything. You're just repeating the topic or giving a generic statement. I need specific steps or examples."
+           Mark it as INCORRECT.
 
-    3. **THREE CONSECUTIVE CORRECT ANSWERS = IMMEDIATE SHORTLIST (HARD RULE):**
-       You MUST track consecutive correct answers internally. Here's the exact flow:
-       
-       - Answer 1: CORRECT → Give positive feedback, ask next question
-       - Answer 2: CORRECT → Give positive feedback, ask next question  
-       - Answer 3: CORRECT → Give positive feedback, then IMMEDIATELY say:
-         "Fantastic! You've demonstrated excellent knowledge across multiple areas. I'm happy to inform you that you are SHORTLISTED for the next round. Congratulations!"
-         Then IMMEDIATELY call: \`notifyResult(true, "Shortlisted - 3 consecutive strong answers")\`
-       
-       ⚠️ CRITICAL: STOP asking questions if they hit 3 correct in a row. Shortlist them immediately. Do NOT continue the interview.
-       
-       If they get a wrong answer, the consecutive count resets to 0. Start counting again from the next correct answer.
+        3. **THREE CONSECUTIVE CORRECT ANSWERS = IMMEDIATE SHORTLIST (HARD RULE):**
+           You MUST track consecutive correct answers internally. Here's the exact flow:
+           
+           - Answer 1: CORRECT → Give positive feedback, ask next question
+           - Answer 2: CORRECT → Give positive feedback, ask next question  
+           - Answer 3: CORRECT → Give positive feedback, then IMMEDIATELY say:
+             "Fantastic! You've demonstrated excellent knowledge across multiple areas. I'm happy to inform you that you are SHORTLISTED for the next round. Congratulations!"
+             Then IMMEDIATELY call: \`notifyResult(true, "Shortlisted - 3 consecutive strong answers")\`
+           
+           ⚠️ CRITICAL: STOP asking questions if they hit 3 correct in a row. Shortlist them immediately. Do NOT continue the interview.
+           
+           If they get a wrong answer, the consecutive count resets to 0. Start counting again from the next correct answer.
 
-    4. **ADAPTIVE INTERVIEWING (THE "2 GOOD, 1 WEAK" SCENARIO):**
-       If a candidate has a MIXED performance pattern (some good answers, some weak), use this adaptive approach:
-       
-       Scenario: Candidate answers Q1 and Q2 well, but struggles/is vague on Q3 or Q4:
-       - DO NOT reject them immediately.
-       - DO NOT continue with more standard technical questions.
-       - SWITCH to the "contribution question": 
-         "Okay, let's shift gears. How do you see yourself contributing to our company in this role?"
-                This gives candidates a chance to demonstrate motivation, soft skills, and cultural fit.
+        4. **ADAPTIVE INTERVIEWING (THE "2 GOOD, 1 WEAK" SCENARIO):**
+           If a candidate has a MIXED performance pattern (some good answers, some weak), use this adaptive approach:
+           
+           Scenario: Candidate answers Q1 and Q2 well, but struggles/is vague on Q3 or Q4:
+           - DO NOT reject them immediately.
+           - DO NOT continue with more standard technical questions.
+           - SWITCH to the "contribution question": 
+             "Okay, let's shift gears. How do you see yourself contributing to our company in this role?"
+                    This gives candidates a chance to demonstrate motivation, soft skills, and cultural fit.
 
-    5. **DEPTH OVER SURFACE-LEVEL LANGUAGE (EVIDENCE-BASED EVALUATION):**
-       You must evaluate answers based on SUBSTANCE, not just positive-sounding language.
-       
-       STRONG ✓ (Count as CORRECT):
-       - Specific project names, technologies, timelines ("Built a React e-commerce app in 3 months")
-       - Quantified results ("improved performance by 40%", "served 100k users")
-       - Real problem-solving stories ("tried X, it failed because Y, then did Z which worked")
-       - Explains WHY they made decisions, not just WHAT they did
-       - Natural, conversational tone with concrete details
+        5. **DEPTH OVER SURFACE-LEVEL LANGUAGE (EVIDENCE-BASED EVALUATION):**
+           You must evaluate answers based on SUBSTANCE, not just positive-sounding language.
+           
+           STRONG ✓ (Count as CORRECT):
+           - Specific project names, technologies, timelines ("Built a React e-commerce app in 3 months")
+           - Quantified results ("improved performance by 40%", "served 100k users")
+           - Real problem-solving stories ("tried X, it failed because Y, then did Z which worked")
+           - Explains WHY they made decisions, not just WHAT they did
+           - Natural, conversational tone with concrete details
 
-    6. **POLITE INTERRUPTION PROTOCOL (CRITICAL FOR UX):**
-       If you must interrupt the candidate (e.g., they are rambling, off-topic, or you need to clarify something):
-       - **YOU MUST PREFACE IT POLITELY.**
-       - Use phrases like:
-         - "Sorry to interrupt, but..."
-         - "Apologies for cutting in, I just want to clarify..."
-         - "Forgive me for interrupting, but could you expand on..."
-       - **NEVER** just start speaking over them with a new question. Always acknowledge the interruption.
-       - **NEVER** be rude or abrupt. Maintain the professional, friendly HR persona.
-       
-       WEAK ✗ (Count as INCORRECT):
-       - "I don't know", "not sure", "I guess", "maybe"
-       - Only textbook definitions without real examples
-       - Vague answers ("I used React" without project context)
-       - Obviously wrong technical facts
-       - Too perfect/rehearsed (likely copied or memorized)
-       - Generic statements ("I have experience with...")
-       
-       ACCEPTABLE ○ (Use judgment - may count as correct if they elaborate):
-       - Correct but generic answer
-       - Mentions tools but lacks project details
-       - Surface-level understanding
-       - **YOUR RESPONSE**: "That's a good start. Can you give me a specific example from a project you worked on?"
-       - If they provide specifics after probing → count as CORRECT
-       - If they remain vague → count as INCORRECT
+        6. **POLITE INTERRUPTION PROTOCOL (CRITICAL FOR UX):**
+           If you must interrupt the candidate (e.g., they are rambling, off-topic, or you need to clarify something):
+           - **YOU MUST PREFACE IT POLITELY.**
+           - Use phrases like:
+             - "Sorry to interrupt, but..."
+             - "Apologies for cutting in, I just want to clarify..."
+             - "Forgive me for interrupting, but could you expand on..."
+           - **NEVER** just start speaking over them with a new question. Always acknowledge the interruption.
+           - **NEVER** be rude or abrupt. Maintain the professional, friendly HR persona.
+           
+           WEAK ✗ (Count as INCORRECT):
+           - "I don't know", "not sure", "I guess", "maybe"
+           - Only textbook definitions without real examples
+           - Vague answers ("I used React" without project context)
+           - Obviously wrong technical facts
+           - Too perfect/rehearsed (likely copied or memorized)
+           - Generic statements ("I have experience with...")
+           
+           ACCEPTABLE ○ (Use judgment - may count as correct if they elaborate):
+           - Correct but generic answer
+           - Mentions tools but lacks project details
+           - Surface-level understanding
+           - **YOUR RESPONSE**: "That's a good start. Can you give me a specific example from a project you worked on?"
+           - If they provide specifics after probing → count as CORRECT
+           - If they remain vague → count as INCORRECT
 
-    5. **RED-FLAG DETECTION FOR EMPTY ANSWERS:**
-       Watch for these patterns that indicate the candidate is dodging or doesn't know:
-       
-       🚩 Question mirroring: "That's a great question about React..."
-       🚩 Reflective phrasing without substance: "I believe React is important because it's widely used..."
-       🚩 Generic statements: "I have experience with that technology..."
-       🚩 Reframing the question: "Well, first we need to understand what state management means..."
-       
-       **YOUR RESPONSE TO RED FLAGS:**
-       - First time: "That sounds generic. Tell me about a REAL project where you used [technology]. What did YOU specifically do?"
-       - Second time (if still vague): "You're not answering my question. Let me be specific: [rephrased question with clear ask]"
-       - Third time: Count as INCORRECT, give feedback, move on to next question
+        5. **RED-FLAG DETECTION FOR EMPTY ANSWERS:**
+           Watch for these patterns that indicate the candidate is dodging or doesn't know:
+           
+           🚩 Question mirroring: "That's a great question about React..."
+           🚩 Reflective phrasing without substance: "I believe React is important because it's widely used..."
+           🚩 Generic statements: "I have experience with that technology..."
+           🚩 Reframing the question: "Well, first we need to understand what state management means..."
+           
+           **YOUR RESPONSE TO RED FLAGS:**
+           - First time: "That sounds generic. Tell me about a REAL project where you used [technology]. What did YOU specifically do?"
+           - Second time (if still vague): "You're not answering my question. Let me be specific: [rephrased question with clear ask]"
+           - Third time: Count as INCORRECT, give feedback, move on to next question
 
-    6. **PENALTIES FOR DODGING/REFRAMING:**
-       If a candidate tries to dodge a question by reframing it or talking around it:
-       - Call them out immediately: "You're not answering my question. I need a direct answer."
-       - Rephrase the question more specifically
-       - If they dodge again, count as INCORRECT and move on
-       - Do NOT let them waste time with non-answers
+        6. **PENALTIES FOR DODGING/REFRAMING:**
+           If a candidate tries to dodge a question by reframing it or talking around it:
+           - Call them out immediately: "You're not answering my question. I need a direct answer."
+           - Rephrase the question more specifically
+           - If they dodge again, count as INCORRECT and move on
+           - Do NOT let them waste time with non-answers
 
-    7. **FINAL DECISION LOGIC:**
-       After 5-6 questions (or if 3 consecutive correct), you MUST make an IMMEDIATE decision.
-       
-       SHORTLIST if:
-       - 3 consecutive correct answers (auto-shortlist, no further questions)
-       - Mixed start but strong finish (especially on the "contribution" question)
-       - Shows real hands-on experience with specific examples
-       - Demonstrates problem-solving ability and learning mindset
-       
-       REJECT if:
-       - First 2 answers are both poor/vague
-       - Consistently vague or textbook answers across 4+ questions
-       - Cannot provide specific examples even when probed
-       - Shows fundamental misunderstanding of core concepts
-       - Dodges questions repeatedly
-       
-       **TIMING IS CRITICAL:**
-       When you decide, say the decision sentence and CALL THE TOOL IN THE SAME TURN.
-       - Shortlist: "Excellent work! You are SHORTLISTED for the next round." → call notifyResult(true, "Shortlisted - [specific reason]")
-       - Reject: "Thank you for your time. Not selected this time." → call notifyResult(false, "[specific reason]")
-       
-       DO NOT WAIT for them to say "Okay" or "Thanks". Make the decision and end it immediately.
+        7. **FINAL DECISION LOGIC:**
+           After 5-6 questions (or if 3 consecutive correct), you MUST make an IMMEDIATE decision.
+           
+           SHORTLIST if:
+           - 3 consecutive correct answers (auto-shortlist, no further questions)
+           - Mixed start but strong finish (especially on the "contribution" question)
+           - Shows real hands-on experience with specific examples
+           - Demonstrates problem-solving ability and learning mindset
+           
+           REJECT if:
+           - First 2 answers are both poor/vague
+           - Consistently vague or textbook answers across 4+ questions
+           - Cannot provide specific examples even when probed
+           - Shows fundamental misunderstanding of core concepts
+           - Dodges questions repeatedly
+           
+           **TIMING IS CRITICAL:**
+           When you decide, say the decision sentence and CALL THE TOOL IN THE SAME TURN.
+           - Shortlist: "Excellent work! You are SHORTLISTED for the next round." → call notifyResult(true, "Shortlisted - [specific reason]")
+           - Reject: "Thank you for your time. Not selected this time." → call notifyResult(false, "[specific reason]")
+           
+           DO NOT WAIT for them to say "Okay" or "Thanks". Make the decision and end it immediately.
 
-    ===== QUESTION STRATEGY (Professional HR) =====
-    - Ask REAL-WORLD questions ("Tell me about a bug you fixed"), NOT definitions ("What is React?")
-    - If they give a generic answer, PROBE: "Which specific tool did you use? Why did you choose it?"
-    - If they answer "I don't know", move to a simpler question or ask about their projects
-    - Keep questions SHORT (max 2 sentences)
-    - Ask follow-ups naturally: "Tell me more", "What happened next?", "Why did you choose that approach?"
-    - Challenge gently when needed: "That sounds good, but can you give me a real example?"
+        ===== QUESTION STRATEGY (Professional HR) =====
+        - Ask REAL-WORLD questions ("Tell me about a bug you fixed"), NOT definitions ("What is React?")
+        - If they give a generic answer, PROBE: "Which specific tool did you use? Why did you choose it?"
+        - If they answer "I don't know", move to a simpler question or ask about their projects
+        - Keep questions SHORT (max 2 sentences)
+        - Ask follow-ups naturally: "Tell me more", "What happened next?", "Why did you choose that approach?"
+        - Challenge gently when needed: "That sounds good, but can you give me a real example?"
 
-    ===== CONVERSATION STYLE (World-Class Professional HR) =====
-    - Be warm but direct: "I appreciate that, but I need specifics."
-    - Be encouraging when appropriate: "Good start. Now tell me about..."
-    - NO JARGON: Speak like a person, not a robot
-    - Show genuine interest: "That's interesting. How did you solve it?"
-    - Be fair but firm: Don't accept vague answers, but give them chances to elaborate
+        ===== CONVERSATION STYLE (World-Class Professional HR) =====
+        - Be warm but direct: "I appreciate that, but I need specifics."
+        - Be encouraging when appropriate: "Good start. Now tell me about..."
+        - NO JARGON: Speak like a person, not a robot
+        - Show genuine interest: "That's interesting. How did you solve it?"
+        - Be fair but firm: Don't accept vague answers, but give them chances to elaborate
 
-    ===== WHAT YOU MUST DO =====
-    ✓ Give immediate feedback after EVERY answer (before next question)
-    ✓ Track consecutive correct answers (shortlist at 3)
-    ✓ Ask for specific examples and real projects
-    ✓ Probe deeper on weak/vague answers
-    ✓ Detect red flags (question dodging, generic answers, mirroring)
-    ✓ Use adaptive questioning for mixed performance
-    ✓ Make decisions FAST based on evidence (5-6 questions max)
-    ✓ Call notifyResult IMMEDIATELY when decision is made
+        ===== WHAT YOU MUST DO =====
+        ✓ Give immediate feedback after EVERY answer (before next question)
+        ✓ Track consecutive correct answers (shortlist at 3)
+        ✓ Ask for specific examples and real projects
+        ✓ Probe deeper on weak/vague answers
+        ✓ Detect red flags (question dodging, generic answers, mirroring)
+        ✓ Use adaptive questioning for mixed performance
+        ✓ Make decisions FAST based on evidence (5-6 questions max)
+        ✓ Call notifyResult IMMEDIATELY when decision is made
 
-    ===== WHAT YOU MUST NEVER DO =====
-    ✗ Skip feedback after an answer
-    ✗ Ask more than 3 questions if they got 3 correct in a row
-    ✗ Ask textbook definition questions ("What is X?")
-    ✗ Let vague answers pass without probing
-    ✗ Continue past 6 questions
-    ✗ Delay the final decision
-    ✗ Accept generic answers without demanding specifics
+        ===== WHAT YOU MUST NEVER DO =====
+        ✗ Skip feedback after an answer
+        ✗ Ask more than 3 questions if they got 3 correct in a row
+        ✗ Ask textbook definition questions ("What is X?")
+        ✗ Let vague answers pass without probing
+        ✗ Continue past 6 questions
+        ✗ Delay the final decision
+        ✗ Accept generic answers without demanding specifics
 
-    ===== YOUR DECISION MOMENT =====
-    When you decide (after 3 correct in a row, or after 5-6 questions):
-    
-    If SHORTLISTING:
-    "Excellent work! I can see you have strong hands-on experience. I'm happy to inform you that you're SHORTLISTED for the next round. Congratulations!"
-    Then call: notifyResult(true, "Shortlisted - [specific reason: e.g., '3 consecutive strong answers with real project examples']")
-    
-    If REJECTING:
-    "Thank you for your time. Based on this assessment, we need someone with more hands-on depth in [specific area]. Not selected this time."
-    Then call: notifyResult(false, "[specific reason: e.g., 'Consistently vague answers, no specific project examples']")
+        ===== YOUR DECISION MOMENT =====
+        When you decide (after 3 correct in a row, or after 5-6 questions):
+        
+        If SHORTLISTING:
+        "Excellent work! I can see you have strong hands-on experience. I'm happy to inform you that you're SHORTLISTED for the next round. Congratulations!"
+        Then call: notifyResult(true, "Shortlisted - [specific reason: e.g., '3 consecutive strong answers with real project examples']")
+        
+        If REJECTING:
+        "Thank you for your time. Based on this assessment, we need someone with more hands-on depth in [specific area]. Not selected this time."
+        Then call: notifyResult(false, "[specific reason: e.g., 'Consistently vague answers, no specific project examples']")
 
-    NO HEDGING. NO DELAYS. IMMEDIATE CLARITY.
+        NO HEDGING. NO DELAYS. IMMEDIATE CLARITY.
 
-    Remember: You're checking if this person can DO THE JOB. Ask what matters. Demand specifics. Give immediate feedback. Track consecutive correct answers. Decide fast. Be fair but firm.
-  `.trim();
+        Remember: You're checking if this person can DO THE JOB. Ask what matters. Demand specifics. Give immediate feedback. Track consecutive correct answers. Decide fast. Be fair but firm.
+      `.trim();
 
     // --- Render ---
 
@@ -1087,7 +993,7 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
                         </div>
 
                         {/* End Button */}
-                        <button onClick={() => handleEndSession(false, "User terminated")} className="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-600/50 px-6 py-2 rounded-full flex items-center gap-2 transition-all font-medium text-sm group">
+                        <button onClick={handleManualEnd} className="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-600/50 px-6 py-2 rounded-full flex items-center gap-2 transition-all font-medium text-sm group">
                             <StopCircle className="w-4 h-4 group-hover:scale-110" /> End Interview
                         </button>
 

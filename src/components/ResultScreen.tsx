@@ -87,8 +87,44 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({ config, result, onRe
       console.warn('⚠️ [VIDEO DEBUG] No video blob available - skipping upload');
     }
 
-    // Step 2: Send interview results via Email
+    // Step 2: Save to Database (Supabase & Google Sheets)
+    await saveToDatabase(uploadedVideoUrl);
+
+    // Step 3: Send interview results via Email
     await sendInterviewViaEmail(uploadedVideoUrl);
+  };
+
+  const saveToDatabase = async (videoUrl: string | null) => {
+    try {
+      console.log('💾 Saving interview data to database...');
+      const response = await fetch('/api/save-interview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: config.name,
+          email: config.email,
+          role: config.role,
+          language: config.language,
+          status: result.passed ? "SELECTED" : "REJECTED",
+          notes: result.notes || "",
+          transcript: result.transcript,
+          videoUrl: videoUrl || '',
+          date: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Database save success:', data);
+    } catch (error) {
+      console.error('❌ Database save failed:', error);
+      // We don't block the email sending if database save fails, but we log it
+    }
   };
 
   const sendInterviewViaEmail = async (videoUrl: string | null) => {
@@ -101,6 +137,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({ config, result, onRe
 
     const emailData = {
       candidateName: config.name,
+      email: config.email,
       role: config.role,
       language: config.language,
       status: result.passed ? "SELECTED" : "REJECTED",

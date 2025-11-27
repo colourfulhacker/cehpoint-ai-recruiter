@@ -15,6 +15,7 @@ emailjs.init(EMAILJS_PUBLIC_KEY);
 
 export interface EmailData {
     candidateName: string;
+    email: string;
     role: string;
     language: string;
     status: string;
@@ -35,6 +36,7 @@ export async function sendInterviewEmail(data: EmailData): Promise<{ success: bo
         const templateParams = {
             to_email: 'cehpoint@gmail.com, hr@cehpoint.co.in',
             candidate_name: data.candidateName,
+            candidate_email: data.email,
             role: data.role,
             language: data.language,
             status: data.status,
