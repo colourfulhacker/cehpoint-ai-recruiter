@@ -63,7 +63,7 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
     // 🛡️ Safety Refs
     const aiDecisionRef = useRef<{ passed: boolean; reason: string } | null>(null);
     const hasCalledNotifyRef = useRef<boolean>(false);
-    const pcmBufferRef = useRef<Int16Array[]>([]);
+    const pcmBufferRef = useRef<Float32Array>(new Float32Array(0));
     const questionCountRef = useRef<number>(0);
     const lastUserSpeechTimeRef = useRef<number>(0);
     const strikeCountRef = useRef<number>(0);
@@ -239,6 +239,16 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({ config, onComp
             return () => clearInterval(timer);
         }
     }, [isSessionActive, timeLeft, showContactOverlay]);
+
+    // Auto-hide instruction banner after 4 seconds
+    useEffect(() => {
+        if (isSessionActive && showInstructionBanner) {
+            const timer = setTimeout(() => {
+                setShowInstructionBanner(false);
+            }, 4000);
+            return () => clearTimeout(timer);
+        }
+    }, [isSessionActive, showInstructionBanner]);
 
     const startInterview = async () => {
         setIsSessionActive(true);
