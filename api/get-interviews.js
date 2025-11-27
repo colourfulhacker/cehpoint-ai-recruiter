@@ -21,23 +21,50 @@ export default async function handler(req, res) {
 
     try {
         console.log('📊 [GET-INTERVIEWS] Fetching interviews from Supabase...');
+        console.log('📊 [GET-INTERVIEWS] Environment check:', {
+            hasUrl: !!process.env.SUPABASE_URL,
+            hasKey: !!process.env.SUPABASE_ANON_KEY,
+            urlPrefix: process.env.SUPABASE_URL?.substring(0, 20)
+        });
 
         if (!supabase) {
             console.error('❌ [GET-INTERVIEWS] Supabase client not initialized (missing env vars)');
             return res.status(503).json({
                 error: 'Database configuration missing',
-                details: 'SUPABASE_URL or SUPABASE_ANON_KEY not set'
+                details: 'SUPABASE_URL or SUPABASE_ANON_KEY not set',
+                env: {
+                    hasUrl: !!process.env.SUPABASE_URL,
+                    hasKey: !!process.env.SUPABASE_ANON_KEY
+                }
             });
         }
+
+        console.log('📊 [GET-INTERVIEWS] Supabase client initialized, querying...');
 
         const { data: interviews, error } = await supabase
             .from('interviews')
             .select('*')
             .order('created_at', { ascending: false });
 
+        console.log('📊 [GET-INTERVIEWS] Query result:', {
+            hasData: !!interviews,
+            dataLength: interviews?.length,
+            hasError: !!error,
+            errorMessage: error?.message,
+            errorDetails: error?.details,
+            errorHint: error?.hint,
+            errorCode: error?.code
+        });
+
         if (error) {
             console.error('❌ [GET-INTERVIEWS] Supabase query error:', error);
-            throw error;
+            return res.status(500).json({
+                error: 'Database query failed',
+                details: error.message,
+                code: error.code,
+                hint: error.hint,
+                supabaseError: error
+            });
         }
 
         if (!interviews || interviews.length === 0) {
@@ -53,13 +80,13 @@ export default async function handler(req, res) {
         const formattedInterviews = interviews.map((interview) => ({
             id: interview.id,
             name: interview.name,
-            email: interview.email, // Include email
+            email: interview.email,
             videoUrl: interview.video_url,
-            publicId: interview.video_url ? interview.video_url.split('/').pop() : 'no-video', // Fallback
-            duration: 0, // Duration might not be stored, can be added if needed
-            format: 'webm', // Default
+            publicId: interview.video_url ? interview.video_url.split('/').pop() : 'no-video',
+            duration: 0,
+            format: 'webm',
             createdAt: interview.created_at,
-            bytes: 0, // Size might not be stored
+            bytes: 0,
             role: interview.role,
             status: interview.status,
             result: interview.result
@@ -74,11 +101,13 @@ export default async function handler(req, res) {
         });
 
     } catch (error) {
-        console.error('❌ [GET-INTERVIEWS] Error:', error.message);
+        console.error('❌ [GET-INTERVIEWS] Unexpected error:', error);
+        console.error('❌ [GET-INTERVIEWS] Error stack:', error.stack);
 
         return res.status(500).json({
             error: 'Failed to fetch interviews',
             details: error.message || 'Unknown server error',
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
             hint: 'Check server logs for more details'
         });
     }
