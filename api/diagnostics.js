@@ -60,8 +60,7 @@ export default async function handler(req, res) {
                     status: 'TEST',
                     notes: 'This is a diagnostic test record',
                     transcript: [{ speaker: 'system', text: 'Diagnostic test', timestamp: new Date().toISOString() }],
-                    video_url: 'https://test.com/diagnostic.mp4',
-                    result: 'TEST'
+                    video_url: 'https://test.com/diagnostic.mp4'
                 };
 
                 const { data: writeData, error: writeError } = await supabase
