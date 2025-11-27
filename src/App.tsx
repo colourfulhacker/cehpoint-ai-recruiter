@@ -3,13 +3,15 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { InterviewScreen } from './components/InterviewScreen';
 import { ResultScreen } from './components/ResultScreen';
 import { HRDashboard } from './components/HRDashboard';
+import { Diagnostics } from './components/Diagnostics';
 import { InterviewConfig, InterviewResult } from './types';
 
 enum AppState {
   WELCOME,
   INTERVIEW,
   RESULT,
-  HR_DASHBOARD
+  HR_DASHBOARD,
+  DIAGNOSTICS
 }
 
 export default function App() {
@@ -23,6 +25,8 @@ export default function App() {
       const path = window.location.pathname;
       if (path === '/cehpoint-hr-dashboard') {
         setState(AppState.HR_DASHBOARD);
+      } else if (path === '/diagnostics') {
+        setState(AppState.DIAGNOSTICS);
       }
     };
 
@@ -53,6 +57,10 @@ export default function App() {
     <div className="bg-slate-900 min-h-screen">
       {state === AppState.HR_DASHBOARD && (
         <HRDashboard />
+      )}
+
+      {state === AppState.DIAGNOSTICS && (
+        <Diagnostics />
       )}
 
       {state === AppState.WELCOME && (
